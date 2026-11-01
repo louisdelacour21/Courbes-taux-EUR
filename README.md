@@ -15,7 +15,7 @@ Fiche projet : `projets-cv/fiches/pdf/09-courbes-taux-swaps.pdf` (dossier Applic
 | 4 | Banc QuantLib €STR (écarts < 1e-10 en CI) | fait |
 | 5 | Courbe EURIBOR 6M + banc QuantLib | fait |
 | 6 | Hagan-West + leave-one-out | fait |
-| 7 | NSS | à faire |
+| 7 | NSS | fait |
 | 8 | Pricer, buckets, couverture, IRRBB | à faire |
 | 9 | PnL explain | à faire |
 | 10 | Démo, rapport, LinkedIn | à faire |
@@ -132,6 +132,42 @@ Deux réserves :
 - Hagan-West n'est pas locale. Les jours du saut, l'IRS 10Y retiré est moins bien repricé (max 3,1 bp contre 2,4 bp) :
   le saut se diffuse aux voisins. La localité des risques par pilier sera mesurée à l'étape 8 ; le log-linéaire reste
   disponible (`classe=Courbe`).
+
+## NSS (`courbes/nss.py`, `etudes/nss.py`)
+
+Nelson-Siegel-Svensson, formule de la BCE, taux zéro en capitalisation continue :
+y(τ) = β0 + β1 L(τ/λ1) + β2 [L(τ/λ1) − e^{−τ/λ1}] + β3 [L(τ/λ2) − e^{−τ/λ2}], avec L(u) = (1 − e^{−u})/u.
+**Usage : lissage, lecture niveau / pente / courbure et extrapolation, jamais pricing** (le pricing reste sur les
+courbes bootstrapées, qui repricent les instruments à 1e-13).
+
+- β par moindres carrés ordinaires à (λ1, λ2) fixés ; (λ1, λ2) par une grille de départ puis `scipy.optimize.least_squares`.
+- Contraintes d'identification : 2 λ1 ≤ λ2 ≤ 30 ans (ordre de la BCE : τ1 ≈ 3 ans, τ2 ≈ 13 ans). Sans elles, l'optimum
+  glisse vers λ1 ≈ λ2 : les deux bosses deviennent colinéaires et β2 ≈ −β3 atteint ±1e3, pour le même RMSE.
+
+**Contrôle de la formule** (`tests/test_nss.py`) : les taux zéro BCE publiés (séries SR_3M, 1Y, 5Y, 10Y, 30Y, un an)
+sont reproduits depuis les paramètres BCE à moins de 0,01 bp. Ce contrôle valide la formule, pas l'ajustement. S'y
+ajoutent un aller-retour sans bruit (paramètres retrouvés, zéros à 1e-7 jusqu'à 40 ans) et un bruit de 1 bp
+correctement mesuré par le RMSE.
+
+**Ajustement aux zéros bootstrapés** ([`etudes/nss.md`](etudes/nss.md)) : chaque jour, NSS est ajusté aux zéros
+Hagan-West des piliers €STR et 6M.
+
+| Courbe | Cotations | RMSE moyen (bp) | RMSE max (bp) | Résidu max (bp) |
+|---|---|---|---|---|
+| €STR | bruitées | 0,55 | 1,86 | 6,17 |
+| 6M | bruitées | 0,67 | 1,87 | 6,02 |
+| €STR | sans bruit (1 jour sur 10) | 0,44 | 1,61 | 5,46 |
+| 6M | sans bruit (1 jour sur 10) | 0,50 | 1,70 | 5,34 |
+
+- Même sans bruit, le RMSE reste à ~0,5 bp : les zéros bootstrapés ne sont pas exactement une courbe Svensson. Le bruit
+  n'ajoute que ~0,1 à 0,2 bp. Le RMSE mesure donc surtout l'erreur de forme de NSS ; les résidus max (5-6 bp) montrent
+  pourquoi NSS ne doit pas servir au pricing.
+- **Stabilité** : le zéro 10 ans bootstrapé varie de 3,4 bp par jour (écart-type), mais les β varient de 50 à 290 bp et un
+  λ saute de plus de 50 % un jour sur dix environ (19 jours en €STR, 32 en 6M). Les contraintes ont divisé ces sauts par
+  3 (59 et 79 sans contraintes) et ramené les variations de β de ~1e8 bp à ~1e2 bp, pour +0,1 bp de RMSE. Les paramètres
+  restent trop instables pour être lus seuls au jour le jour.
+- **Extrapolation à 40 ans** : NSS est en moyenne 5,5 bp sous le dernier forward prolongé des courbes bootstrapées
+  (de −17 à +16 bp selon les jours).
 
 ## Lancer les tests
 

@@ -19,7 +19,7 @@ SERIES = {
     "estr": "EST.B.EU000A2X2A25.WT",               # €STR, % ACT/360
     "dfr": "FM.D.U2.EUR.4F.KR.DFR.LEV",            # taux de la facilité de dépôt, %
     "euribor6m": "FM.M.U2.EUR.RT.MM.EURIBOR6MD_.HSTA",  # moyenne mensuelle EURIBOR 6M, %
-    **{p.lower(): _AAA + p for p in ("BETA0", "BETA1", "BETA2", "BETA3", "TAU1", "TAU2", "SR_1Y", "SR_10Y")},
+    **{p.lower(): _AAA + p for p in ("BETA0", "BETA1", "BETA2", "BETA3", "TAU1", "TAU2", "SR_3M", "SR_1Y", "SR_5Y", "SR_10Y", "SR_30Y")},
 }
 
 
