@@ -1,4 +1,4 @@
-"""Courbe d'actualisation €STR : inconnues x_k = ln P(T_k) aux piliers, interpolation log-linéaire, Newton global.
+"""Courbes €STR (actualisation) et EURIBOR 6M (projection) : inconnues x_k = ln P(T_k) aux piliers, interpolation log-linéaire, Newton global.
 
 Le jacobien est analytique : la courbe renvoie des `Dual` (valeur + gradient par rapport aux x_k), propagés
 exactement par les formules des instruments (différentiation automatique en mode direct).
@@ -9,7 +9,7 @@ from datetime import date
 import numpy as np
 
 from courbes import dates as dt
-from courbes.instruments import OIS
+from courbes.instruments import IRS, OIS, Depot
 
 
 class Dual:
@@ -85,8 +85,11 @@ class Courbe:
         return Dual(p, g)
 
 
-def newton(jour: date, instruments: list, cotations, tol: float = 1e-13, max_iter: int = 30) -> Courbe:
+def newton(jour: date, instruments: list, cotations, actualisation=None, tol: float = 1e-13,
+           max_iter: int = 30) -> Courbe:
     """Résout taux_k(courbe) = cotation_k (décimal) ; un pilier par instrument (dernière date pertinente).
+
+    `actualisation` : courbe d'actualisation exogène (P(date) flottant) passée aux instruments ; None = la courbe elle-même.
 
     Départ : courbe à taux plat égal à chaque cotation. shortcut: la fiche prévoit un départ par bootstrap
     séquentiel ; inutile en log-linéaire (Newton converge en ~4 itérations), à revoir pour Hagan-West (étape 6).
@@ -97,7 +100,7 @@ def newton(jour: date, instruments: list, cotations, tol: float = 1e-13, max_ite
     q = np.asarray(cotations, dtype=float)
     c = Courbe(jour, piliers, -q * np.array([dt.year_fraction(jour, d, "ACT/365F") for d in piliers]))
     for _ in range(max_iter):
-        duals = [i.taux(c.P_dual) for i in instruments]
+        duals = [i.taux(c.P_dual, actualisation) if actualisation else i.taux(c.P_dual) for i in instruments]
         residus = np.array([d.v for d in duals]) - q
         c.jacobien = np.array([d.g for d in duals])  # dR/dx, réutilisé pour les buckets (étape 8)
         c.residus = residus
@@ -113,4 +116,28 @@ def courbe_estr(jour: date, cotations_ois: dict) -> Courbe:
     instruments = sorted((OIS(spot, t) for t in cotations_ois), key=lambda i: i.pilier)
     c = newton(jour, instruments, [cotations_ois[i.tenor] / 100 for i in instruments])
     c.instruments = instruments
+    return c
+
+
+def courbe_euribor6m(jour: date, cotations: dict, estr: Courbe) -> Courbe:
+    """Courbe de projection EURIBOR 6M, actualisée sur la courbe €STR.
+
+    `cotations` en % : {"DEPOT 6M": r, "FRA 1x7": r, ..., "IRS 2Y": r, ...}. Un instrument dont le pilier coïncide avec
+    celui d'un instrument plus court est écarté (en pratique l'IRS 2Y, même maturité que le FRA 18x24).
+    """
+    spot = dt.add_business_days(jour, 2)
+    tous = []
+    for cle, v in cotations.items():
+        typ, tenor = cle.split()
+        i = Depot(spot) if typ == "DEPOT" else Depot(spot, int(tenor.split("x")[0])) if typ == "FRA" else IRS(spot, tenor)
+        tous.append((i.pilier, typ == "IRS", i, v))
+    instruments, q, vus = [], [], set()
+    for pilier, _, i, v in sorted(tous, key=lambda x: x[:2]):  # à pilier égal, le dépôt / FRA passe avant l'IRS
+        if pilier not in vus:
+            vus.add(pilier)
+            instruments.append(i)
+            q.append(v / 100)
+    c = newton(jour, instruments, q, actualisation=estr.P)
+    c.instruments = instruments
+    c.cotations = q  # décimal, dans l'ordre des instruments retenus
     return c

@@ -4,7 +4,7 @@ QuantLib : OISRateHelper (ql.Estr, spot 2, paiement J+1 MF TARGET, fin de mois, 
 PiecewiseLogLinearDiscount en ACT/365F, précision du bootstrap 1e-14.
 """
 import random
-from datetime import date, timedelta
+from datetime import timedelta
 
 import QuantLib as ql
 import pytest
@@ -13,32 +13,10 @@ from courbes import cotations as c
 from courbes import dates as dt
 from courbes.curves import courbe_estr
 from courbes.instruments import OIS
+from ql_banc import courbe_estr as courbe_ql, jours_du_banc, q
 
 TOL = 1e-10
 ALEA = random.Random(20261104)
-
-
-def q(d: date) -> ql.Date:
-    return ql.Date(d.day, d.month, d.year)
-
-
-def courbe_ql(jour: date, cotations_ois: dict):
-    ql.Settings.instance().evaluationDate = q(jour)
-    helpers = [ql.OISRateHelper(2, ql.Period(t), ql.QuoteHandle(ql.SimpleQuote(v / 100)), ql.Estr(),
-                                paymentLag=1, paymentConvention=ql.ModifiedFollowing, paymentCalendar=ql.TARGET(),
-                                endOfMonth=True, pillar=ql.Pillar.LastRelevantDate)
-               for t, v in cotations_ois.items()]
-    k = ql.PiecewiseLogLinearDiscount(q(jour), helpers, ql.Actual365Fixed(), [], [], ql.LogLinear(),
-                                      ql.IterativeBootstrap(1e-14))
-    k.enableExtrapolation()
-    return k, helpers
-
-
-def jours_du_banc(cot):
-    jours = sorted(cot.date.unique())
-    # un jour sur 10, plus tous les jours dont le spot est un dernier jour ouvré du mois (règle de fin de mois)
-    fin_de_mois = [j for j in jours if dt.is_end_of_month(dt.add_business_days(j, 2))]
-    return sorted(set(jours[::10]) | set(fin_de_mois) | {jours[-1]})
 
 
 COT = c.lire_cotations()

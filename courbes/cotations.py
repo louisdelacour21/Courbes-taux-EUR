@@ -16,7 +16,7 @@ import pandas as pd
 
 from courbes import dates as dt
 from courbes.donnees import DEBUT, FIN, serie
-from courbes.instruments import OIS
+from courbes.instruments import IRS, OIS, Depot
 
 FICHIER = Path(__file__).resolve().parent.parent / "data" / "cotations.csv"
 COLONNES = ["date", "type", "tenor", "taux", "source"]
@@ -65,14 +65,10 @@ def ois_par(P, spot: date, tenor: str) -> float:
 
 
 def irs_par(P, spot: date, tenor: str, base: float) -> float:
-    """Taux de swap contre EURIBOR 6M : fixe annuel 30/360, variable semestriel ACT/360, MF, à rebours."""
-    fin = dt.advance(spot, tenor, "MF")
-    fixe = dt.schedule(spot, fin, "1Y", "MF")
-    var = dt.schedule(spot, fin, "6M", "MF")
-    # shortcut: forward EURIBOR sur la période de calcul (pas sur la période de fixing J-2), écart < 0.1 bp
-    num = sum((forward(P, a, b) + base) * dt.year_fraction(a, b, "ACT/360") * P(b) for a, b in zip(var, var[1:]))
-    den = sum(dt.year_fraction(a, b, "30/360") * P(b) for a, b in zip(fixe, fixe[1:]))
-    return num / den
+    """Taux de swap contre EURIBOR 6M (conventions de instruments.IRS), forward 6M = forward €STR + base."""
+    i = IRS(spot, tenor)
+    num = sum((forward(P, a, b) + base) * tau * P(b) for a, b, tau in i.variable)
+    return num / sum(tau * P(b) for b, tau in i.fixe)
 
 
 def _marche() -> pd.DataFrame:
@@ -88,7 +84,8 @@ def bases_mensuelles(marche: pd.DataFrame) -> dict:
     for jour, r in marche.iterrows():
         P = actualisation(jour, r.iloc[:6].tolist(), r.estr)
         spot = dt.add_business_days(jour, 2)
-        modele.setdefault(f"{jour:%Y-%m}", []).append(forward(P, spot, dt.advance(spot, "6M", "MF")))
+        d = Depot(spot)
+        modele.setdefault(f"{jour:%Y-%m}", []).append(forward(P, d.debut, d.fin))
     bases, derniere = {}, None
     for mois, f in modele.items():
         if mois in euribor.index:
@@ -108,10 +105,8 @@ def reconstituer(debut: date = DEBUT, fin: date = FIN, graine: int = GRAINE, bru
         spot = dt.add_business_days(jour, 2)
         base = bases[f"{jour:%Y-%m}"]
         cot = [("OIS", t, ois_par(P, spot, t)) for t in OIS_TENORS]
-        cot.append(("DEPOT", "6M", forward(P, spot, dt.advance(spot, "6M", "MF")) + base))
-        for m in FRA_DEBUTS:
-            a = dt.advance(spot, f"{m}M", "MF")
-            cot.append(("FRA", f"{m}x{m + 6}", forward(P, a, dt.advance(a, "6M", "MF")) + base))
+        for d in [Depot(spot)] + [Depot(spot, m) for m in FRA_DEBUTS]:
+            cot.append(("DEPOT" if d.tenor == "6M" else "FRA", d.tenor, forward(P, d.debut, d.fin) + base))
         cot += [("IRS", t, irs_par(P, spot, t, base)) for t in IRS_TENORS]
 
         lignes.append((jour, "ESTR", "ON", r.estr))  # fixing publié, non bruité

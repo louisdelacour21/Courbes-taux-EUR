@@ -13,7 +13,7 @@ Fiche projet : `projets-cv/fiches/pdf/09-courbes-taux-swaps.pdf` (dossier Applic
 | 2 | Données BCE, reconstitution, `hypotheses.md` | fait |
 | 3 | Courbe €STR log-linéaire, Newton global | fait |
 | 4 | Banc QuantLib €STR (écarts < 1e-10 en CI) | fait |
-| 5 | Courbe EURIBOR 6M + banc QuantLib | à faire |
+| 5 | Courbe EURIBOR 6M + banc QuantLib | fait |
 | 6 | Hagan-West + leave-one-out | à faire |
 | 7 | NSS | à faire |
 | 8 | Pricer, buckets, couverture, IRRBB | à faire |
@@ -73,6 +73,19 @@ spot tombe en fin de mois, et le dernier. Pour chacun, le banc compare :
 Deux conventions comptent pour obtenir des écarts de l'ordre de 1e-15 :
 - l'échéancier se génère depuis la maturité **non ajustée** (spot + ténor) ;
 - quand le spot est un dernier jour ouvré du mois, la maturité est reportée au dernier jour du mois (règle de fin de mois).
+
+## Courbe EURIBOR 6M (`courbe_euribor6m`)
+
+- Instruments : dépôt 6M, FRA 1x7 à 18x24 (ACT/360, MF fin de mois), IRS 3Y-30Y (fixe annuel 30/360 Bond Basis,
+  variable semestriel ACT/360, fin de mois, maturité non ajustée comme l'OIS).
+- L'IRS 2Y est écarté : son pilier coïncide avec celui du FRA 18x24 (QuantLib refuse aussi deux piliers égaux).
+- Actualisation exogène sur la courbe €STR (CSA cash EUR) ; même Newton global, la courbe €STR restant fixe.
+- Coupon variable « au pair » (réglage par défaut de QuantLib) : forward 6M sur la période de calcul.
+
+**Banc QuantLib** (`tests/test_quantlib_euribor6m.py`, écart toléré 1e-10, mêmes jours que le banc €STR) :
+`DepositRateHelper`, `FraRateHelper`, `SwapRateHelper` actualisé sur la courbe €STR QuantLib. Le banc compare les piliers,
+les facteurs d'actualisation 6M sur 500 dates, les taux au pair et 200 swaps aléatoires (`MakeVanillaSwap.fairRate`,
+départ décalé jusqu'à 5 ans, ténor de 1 à 30 ans). Écarts observés de l'ordre de 1e-15.
 
 ## Lancer les tests
 
