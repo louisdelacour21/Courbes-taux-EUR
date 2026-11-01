@@ -11,7 +11,7 @@ Fiche projet : `projets-cv/fiches/pdf/09-courbes-taux-swaps.pdf` (dossier Applic
 |---|-------|------|
 | 1 | Moteur de dates comparé jour par jour à QuantLib (2000-2060) | fait |
 | 2 | Données BCE, reconstitution, `hypotheses.md` | fait |
-| 3 | Courbe €STR log-linéaire, Newton global | à faire |
+| 3 | Courbe €STR log-linéaire, Newton global | fait |
 | 4 | Banc QuantLib €STR (écarts < 1e-10 en CI) | à faire |
 | 5 | Courbe EURIBOR 6M + banc QuantLib | à faire |
 | 6 | Hagan-West + leave-one-out | à faire |
@@ -45,6 +45,21 @@ devient donc le 1er novembre. Le moteur reproduit ce comportement.
 6M). Elles sont reconstituées à partir de séries BCE gratuites (courbe AAA, €STR, EURIBOR 6M mensuel), car aucune
 source gratuite ne publie de cotations de swaps. Méthode, hypothèses et impact estimé : [`hypotheses.md`](hypotheses.md).
 Le même format accepte de vraies cotations (`source = reel`).
+
+## Courbe €STR (`courbes/curves.py`, `courbes/instruments.py`)
+
+- Inconnues : x_k = ln P(T_k), un pilier par OIS (dernière date pertinente = dernier paiement, J+1 ouvré).
+- Interpolation log-linéaire en t = ACT/365F, forward constant au-delà du dernier pilier.
+- **Newton global** à jacobien analytique : la courbe renvoie des nombres duaux (valeur + gradient) que les
+  formules des instruments propagent exactement. Arrêt à max|taux implicite − cotation| < 1e-13.
+- Le jacobien dR/dx est conservé pour les risques par pilier (étape 8).
+
+**Validation** (`tests/test_curves.py`) :
+- repricing au pair à moins de 1e-13 sur un jour sur dix de l'année de cotations ;
+- jacobien égal aux différences finies à 1e-6 près ;
+- sur cotations non bruitées, la courbe retombe sur la courbe génératrice aux piliers (~1e-6 jusqu'à 10 ans).
+  Entre deux piliers éloignés (25-30 ans), le log-linéaire s'en écarte jusqu'à ~2e-3 en DF : c'est ce que
+  l'étape 6 doit mesurer.
 
 ## Lancer les tests
 

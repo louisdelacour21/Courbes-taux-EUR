@@ -16,6 +16,7 @@ import pandas as pd
 
 from courbes import dates as dt
 from courbes.donnees import DEBUT, FIN, serie
+from courbes.instruments import OIS
 
 FICHIER = Path(__file__).resolve().parent.parent / "data" / "cotations.csv"
 COLONNES = ["date", "type", "tenor", "taux", "source"]
@@ -60,17 +61,7 @@ def forward(P, a: date, b: date) -> float:
 
 
 def ois_par(P, spot: date, tenor: str) -> float:
-    """Taux OIS €STR : un seul flux jusqu'à 1 an puis annuel, ACT/360, MF fin de mois, paiement J+1."""
-    fin = dt.advance(spot, tenor, "MF", eom=True)
-    n, u = dt.parse_tenor(tenor)
-    mois = n * 12 if u == "Y" else n if u == "M" else 0
-    echeances = dt.schedule(spot, fin, "1Y", "MF", eom=True) if mois > 12 else [spot, fin]
-    flottant = fixe = 0.0
-    for a, b in zip(echeances, echeances[1:]):
-        p = P(dt.add_business_days(b, 1))
-        flottant += (P(a) / P(b) - 1) * p
-        fixe += dt.year_fraction(a, b, "ACT/360") * p
-    return flottant / fixe
+    return OIS(spot, tenor).taux(P)
 
 
 def irs_par(P, spot: date, tenor: str, base: float) -> float:
