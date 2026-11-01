@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "courbes-taux"
+version = "0.0.1"
+description = "Courbes de taux EUR multi-courbes (€STR / EURIBOR 6M) et pricer de swaps, validés contre QuantLib"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+test = ["pytest", "QuantLib"]
+
+[tool.setuptools]
+packages = ["courbes"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
