@@ -17,24 +17,29 @@ def jours_du_banc(cot):
     return sorted(set(jours[::10]) | set(fin_de_mois) | {jours[-1]})
 
 
-def courbe(jour: date, helpers):
-    k = ql.PiecewiseLogLinearDiscount(q(jour), helpers, ql.Actual365Fixed(), [], [], ql.LogLinear(),
-                                      ql.IterativeBootstrap(1e-14))
+def courbe(jour: date, helpers, hw=False):
+    """hw : Hagan-West monotone convexe, sans mélange quadratique (0), monotone (1), sans plancher de positivité."""
+    if hw:
+        k = ql.PiecewiseConvexMonotoneForward(q(jour), helpers, ql.Actual365Fixed(), ql.IterativeBootstrap(1e-14),
+                                              ql.ConvexMonotone(0.0, 1.0, False))
+    else:
+        k = ql.PiecewiseLogLinearDiscount(q(jour), helpers, ql.Actual365Fixed(), [], [], ql.LogLinear(),
+                                          ql.IterativeBootstrap(1e-14))
     k.enableExtrapolation()
     return k
 
 
-def courbe_estr(jour: date, cotations_ois: dict):
+def courbe_estr(jour: date, cotations_ois: dict, hw=False):
     """OISRateHelper : ql.Estr, spot 2, paiement J+1 MF TARGET, fin de mois, pilier LastRelevantDate."""
     ql.Settings.instance().evaluationDate = q(jour)
     helpers = [ql.OISRateHelper(2, ql.Period(t), ql.QuoteHandle(ql.SimpleQuote(v / 100)), ql.Estr(),
                                 paymentLag=1, paymentConvention=ql.ModifiedFollowing, paymentCalendar=ql.TARGET(),
                                 endOfMonth=True, pillar=ql.Pillar.LastRelevantDate)
                for t, v in cotations_ois.items()]
-    return courbe(jour, helpers), helpers
+    return courbe(jour, helpers, hw), helpers
 
 
-def courbe_euribor6m(jour: date, instruments, cotations: list, estr):
+def courbe_euribor6m(jour: date, instruments, cotations: list, estr, hw=False):
     """Mêmes instruments que les nôtres (liste déjà triée et dédoublonnée), actualisation sur la courbe €STR `estr`."""
     ql.Settings.instance().evaluationDate = q(jour)
     actu = ql.YieldTermStructureHandle(estr)
@@ -50,4 +55,4 @@ def courbe_euribor6m(jour: date, instruments, cotations: list, estr):
                                              ql.Thirty360(ql.Thirty360.BondBasis), ql.Euribor6M(),
                                              ql.QuoteHandle(), ql.Period(0, ql.Days), actu, 2,
                                              ql.Pillar.LastRelevantDate, ql.Date(), True))
-    return courbe(jour, helpers), helpers
+    return courbe(jour, helpers, hw), helpers
