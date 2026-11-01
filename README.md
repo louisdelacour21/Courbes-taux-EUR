@@ -12,7 +12,7 @@ Fiche projet : `projets-cv/fiches/pdf/09-courbes-taux-swaps.pdf` (dossier Applic
 | 1 | Moteur de dates comparé jour par jour à QuantLib (2000-2060) | fait |
 | 2 | Données BCE, reconstitution, `hypotheses.md` | fait |
 | 3 | Courbe €STR log-linéaire, Newton global | fait |
-| 4 | Banc QuantLib €STR (écarts < 1e-10 en CI) | à faire |
+| 4 | Banc QuantLib €STR (écarts < 1e-10 en CI) | fait |
 | 5 | Courbe EURIBOR 6M + banc QuantLib | à faire |
 | 6 | Hagan-West + leave-one-out | à faire |
 | 7 | NSS | à faire |
@@ -60,6 +60,19 @@ Le même format accepte de vraies cotations (`source = reel`).
 - sur cotations non bruitées, la courbe retombe sur la courbe génératrice aux piliers (~1e-6 jusqu'à 10 ans).
   Entre deux piliers éloignés (25-30 ans), le log-linéaire s'en écarte jusqu'à ~2e-3 en DF : c'est ce que
   l'étape 6 doit mesurer.
+
+**Banc QuantLib** (`tests/test_quantlib_estr.py`, écart toléré 1e-10) : la même courbe est construite avec
+`OISRateHelper` (spot 2, paiement J+1 MF TARGET, fin de mois, pilier `LastRelevantDate`) et
+`PiecewiseLogLinearDiscount` en ACT/365F (précision du bootstrap 1e-14). Les jours testés sont un sur dix, tous ceux dont le
+spot tombe en fin de mois, et le dernier. Pour chacun, le banc compare :
+- les piliers ;
+- les facteurs d'actualisation sur 500 dates jusqu'à 40 ans ;
+- les taux au pair des instruments de calage ;
+- 200 OIS aléatoires (`MakeOIS.fairRate`, départ décalé jusqu'à 5 ans, ténor de 1W à 30Y).
+
+Deux conventions comptent pour obtenir des écarts de l'ordre de 1e-15 :
+- l'échéancier se génère depuis la maturité **non ajustée** (spot + ténor) ;
+- quand le spot est un dernier jour ouvré du mois, la maturité est reportée au dernier jour du mois (règle de fin de mois).
 
 ## Lancer les tests
 

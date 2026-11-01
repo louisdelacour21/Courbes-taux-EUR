@@ -2,7 +2,7 @@
 
 P peut renvoyer des flottants ou des `Dual` (courbes/curves.py) : le même code donne alors le taux et son gradient.
 """
-from datetime import date
+from datetime import date, timedelta
 
 from courbes import dates as dt
 
@@ -15,10 +15,18 @@ class OIS:
 
     def __init__(self, spot: date, tenor: str):
         self.tenor = tenor
-        fin = dt.advance(spot, tenor, "MF", eom=True)
         n, u = dt.parse_tenor(tenor)
-        mois = n * 12 if u == "Y" else n if u == "M" else 0
-        ech = dt.schedule(spot, fin, "1Y", "MF", eom=True) if mois > 12 else [spot, fin]
+        if u == "D":
+            raise ValueError("OIS : ténor en semaines, mois ou années")
+        # échéancier généré depuis la maturité NON ajustée (spot + ténor), comme ql.MakeOIS ; jusqu'à 1 an,
+        # la génération annuelle à rebours ne donne qu'une période
+        if u == "W":
+            fin = spot + timedelta(weeks=n)
+        else:
+            fin = dt.add_months(spot, n * 12 if u == "Y" else n)
+            if dt.is_end_of_month(spot):  # règle de fin de mois : spot en fin de mois → maturité en fin de mois
+                fin = dt.last_day_of_month(fin)
+        ech = dt.schedule(spot, fin, "1Y", "MF", eom=True)
         self.periodes = [(a, b, dt.add_business_days(b, 1), dt.year_fraction(a, b, "ACT/360"))
                          for a, b in zip(ech, ech[1:])]
         self.pilier = self.periodes[-1][2]  # dernière date pertinente : dernier paiement
