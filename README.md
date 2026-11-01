@@ -10,7 +10,7 @@ Fiche projet : `projets-cv/fiches/pdf/09-courbes-taux-swaps.pdf` (dossier Applic
 | # | Étape | État |
 |---|-------|------|
 | 1 | Moteur de dates comparé jour par jour à QuantLib (2000-2060) | fait |
-| 2 | Données BCE, reconstitution, `hypotheses.md` | à faire |
+| 2 | Données BCE, reconstitution, `hypotheses.md` | fait |
 | 3 | Courbe €STR log-linéaire, Newton global | à faire |
 | 4 | Banc QuantLib €STR (écarts < 1e-10 en CI) | à faire |
 | 5 | Courbe EURIBOR 6M + banc QuantLib | à faire |
@@ -36,6 +36,16 @@ d'échéanciers tirés au hasard (graine fixe). Aucun écart toléré.
 à partir du dernier jour *calendaire* du mois ; en convention following, un 31 octobre tombant un dimanche
 devient donc le 1er novembre. Le moteur reproduit ce comportement.
 
+## Données (`courbes/donnees.py`, `courbes/cotations.py`)
+
+> Niveaux reconstitués le 01/11/2026 ; validation QuantLib indépendante de la provenance ; études d'interpolation
+> et PnL explain sur données synthétiques.
+
+`data/cotations.csv` contient un an de cotations quotidiennes (€STR, OIS 1W-30Y, dépôt 6M, FRA, IRS 2Y-30Y contre
+6M). Elles sont reconstituées à partir de séries BCE gratuites (courbe AAA, €STR, EURIBOR 6M mensuel), car aucune
+source gratuite ne publie de cotations de swaps. Méthode, hypothèses et impact estimé : [`hypotheses.md`](hypotheses.md).
+Le même format accepte de vraies cotations (`source = reel`).
+
 ## Lancer les tests
 
 ```bash
@@ -43,4 +53,4 @@ python -m pip install -e ".[test]"
 python -m pytest
 ```
 
-Outils gratuits et open source uniquement (Python, NumPy, QuantLib, pytest).
+Outils gratuits et open source uniquement (Python, NumPy, pandas, QuantLib, pytest) et données publiques BCE.
