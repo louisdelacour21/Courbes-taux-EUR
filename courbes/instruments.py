@@ -44,6 +44,9 @@ class OIS:
             fixe += tau * p
         return flottant / fixe
 
+    def annuite(self, Pd):
+        return sum(tau * Pd(paiement) for _, _, paiement, tau in self.periodes)
+
 
 class Depot:
     """Dépôt / FRA EURIBOR 6M : spot + m mois → + 6M, ACT/360, MF fin de mois. Taux = forward simple de la courbe 6M."""
@@ -57,6 +60,9 @@ class Depot:
 
     def taux(self, P6, Pd=None):
         return (P6(self.debut) / P6(self.fin) - 1) / self.tau
+
+    def annuite(self, Pd):
+        return self.tau * Pd(self.fin)
 
 
 class IRS:
@@ -78,4 +84,7 @@ class IRS:
     def taux(self, P6, Pd=None):
         Pd = Pd or P6
         flottant = sum((P6(a) / P6(b) - 1) * Pd(b) for a, b, _ in self.variable)
-        return flottant / sum(tau * Pd(b) for b, tau in self.fixe)
+        return flottant / self.annuite(Pd)
+
+    def annuite(self, Pd):
+        return sum(tau * Pd(b) for b, tau in self.fixe)

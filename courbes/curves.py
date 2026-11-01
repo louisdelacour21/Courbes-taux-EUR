@@ -217,6 +217,7 @@ def courbe_estr(jour: date, cotations_ois: dict, classe=Courbe) -> Courbe:
     instruments = sorted((OIS(spot, t) for t in cotations_ois), key=lambda i: i.pilier)
     c = newton(jour, instruments, [cotations_ois[i.tenor] / 100 for i in instruments], classe=classe)
     c.instruments = instruments
+    c.cotations = [cotations_ois[i.tenor] / 100 for i in instruments]
     return c
 
 

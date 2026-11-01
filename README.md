@@ -16,7 +16,7 @@ Fiche projet : `projets-cv/fiches/pdf/09-courbes-taux-swaps.pdf` (dossier Applic
 | 5 | Courbe EURIBOR 6M + banc QuantLib | fait |
 | 6 | Hagan-West + leave-one-out | fait |
 | 7 | NSS | fait |
-| 8 | Pricer, buckets, couverture, IRRBB | à faire |
+| 8 | Pricer, buckets, couverture, IRRBB | fait |
 | 9 | PnL explain | à faire |
 | 10 | Démo, rapport, LinkedIn | à faire |
 
@@ -130,8 +130,8 @@ Deux réserves :
 - Les cotations dérivent d'une courbe Svensson lisse, ce qui avantage une interpolation lisse. Le classement reste à
   confirmer sur de vraies cotations.
 - Hagan-West n'est pas locale. Les jours du saut, l'IRS 10Y retiré est moins bien repricé (max 3,1 bp contre 2,4 bp) :
-  le saut se diffuse aux voisins. La localité des risques par pilier sera mesurée à l'étape 8 ; le log-linéaire reste
-  disponible (`classe=Courbe`).
+  le saut se diffuse aux voisins. La non-localité des buckets est mesurée à l'étape 8 (section suivante) ; le log-linéaire
+  reste disponible (`classe=Courbe`).
 
 ## NSS (`courbes/nss.py`, `etudes/nss.py`)
 
@@ -168,6 +168,37 @@ Hagan-West des piliers €STR et 6M.
   restent trop instables pour être lus seuls au jour le jour.
 - **Extrapolation à 40 ans** : NSS est en moyenne 5,5 bp sous le dernier forward prolongé des courbes bootstrapées
   (de −17 à +16 bp selon les jours).
+
+## Pricer et risques (`courbes/pricing.py`, `courbes/risque.py`, `etudes/risque.py`)
+
+Swap payeur : V = N [Σ τ_j F_j Pd(t_j) − K Σ τ_i Pd(t_i)], F_j projeté sur la courbe 6M, actualisation €STR. Le
+portefeuille (`data/portefeuille.csv`) compte dix swaps : payeurs et receveurs, départs décalés, swaps en cours de vie.
+**Les fixings EURIBOR 6M passés sont construits par hypothèse** : cotation DEPOT 6M reconstituée du jour de fixing.
+
+- **Buckets** : ∂V/∂q = (∂V/∂x) J⁻¹, avec J = ∂R/∂x le jacobien global des deux courbes (x = [x_€STR, x_6M],
+  triangulaire par blocs), obtenu par nombres duaux. Résultat en EUR par bp de cotation, en 0,1 s.
+- **DV01** publié deux fois : par cotations (±1 bp, rebootstrap complet) et par taux zéro (+1 bp sur les zéros des
+  deux courbes). Ils diffèrent d'environ 4 % (36 256 contre 37 593 EUR/bp).
+- **Couverture** : h = −B⁻¹δ en instruments de calage au pair ; B est diagonale (annuité × 1 bp), calculée sans le
+  supposer. Résidu ~1e-12 EUR/bp.
+- **IRRBB** (BCBS 2016, EUR) : six chocs sur les taux zéro des deux courbes, plancher EBA post-choc
+  max(r + Δ, min(r, −150 + 3t bp)), revalorisation complète. Pire scénario : parallèle bas, ΔEVE −9,6 M€. Les chocs par
+  maturité sont exportés pour le projet 04 (stress tests) : [`etudes/chocs_irrbb.yaml`](etudes/chocs_irrbb.yaml).
+
+**Contrôles** (`tests/test_risque.py`, en log-linéaire et Hagan-West) :
+- swap au pair à 1e-10 × N ;
+- NPV des dix swaps identiques à QuantLib (`MakeVanillaSwap`, `DiscountingSwapEngine`) à 1e-10 × N ;
+- buckets égaux aux bumps de cotation (1e-7 relatif en log-linéaire). En Hagan-West, l'écart va jusqu'à ~1e-5 relatif :
+  l'interpolation n'est pas dérivable aux frontières de ses régions ;
+- Σ buckets = DV01 parallèle à 1e-3 ;
+- portefeuille couvert à buckets nuls ;
+- formules des chocs et du plancher.
+
+**Localité** ([`etudes/risque.md`](etudes/risque.md)) : un swap spot de ténor coté a ses dates sur les piliers, donc
+mêmes buckets dans les deux interpolations. Le P10Y-2024 (échéance 15/03/2034, entre les piliers 7Y et 8Y) répartit
+28 % de ses |buckets| hors IRS 7Y/8Y en Hagan-West contre 9 % en log-linéaire, dont −5 257 EUR/bp sur l'IRS 9Y (0 en
+log-linéaire). C'est le prix de la meilleure interpolation constatée à l'étape 6 : une couverture Hagan-West mobilise
+plus d'instruments.
 
 ## Lancer les tests
 
