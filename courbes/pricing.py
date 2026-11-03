@@ -24,23 +24,36 @@ class Swap:
         """Dates de fixing passées des coupons variables encore vivants."""
         return [f for a, b, _ in self.ech.variable if b > jour and (f := dt.add_business_days(a, -2)) < jour]
 
-    def valeur(self, jour: date, P6, Pd, fixing=None):
-        """`fixing(date)` : fixing EURIBOR 6M publié (décimal), requis pour les swaps en cours de vie."""
+    def valeur(self, jour: date, P6, Pd, fixing=None, coupure: date | None = None):
+        """`fixing(date)` : fixing EURIBOR 6M publié (décimal), requis pour les swaps en cours de vie.
+
+        `coupure` : fixings publiés pour les dates antérieures à `coupure` (défaut : jour), forwards au-delà.
+        """
+        coupure = coupure or jour
         fixe = sum(tau * Pd(b) for b, tau in self.ech.fixe if b > jour)
         flottant = 0.0
         for a, b, tau in self.ech.variable:
             if b <= jour:
                 continue
             f = dt.add_business_days(a, -2)
-            flottant = flottant + tau * (fixing(f) if f < jour else (P6(a) / P6(b) - 1) / tau) * Pd(b)
+            flottant = flottant + tau * (fixing(f) if f < coupure else (P6(a) / P6(b) - 1) / tau) * Pd(b)
+        return (1 if self.payeur else -1) * self.N * (flottant - self.K * fixe)
+
+    def flux(self, jour0: date, jour1: date, fixing) -> float:
+        """Flux nets payés dans ]jour0, jour1] (fixings tous publiés)."""
+        fixe = sum(tau for b, tau in self.ech.fixe if jour0 < b <= jour1)
+        flottant = sum(tau * fixing(dt.add_business_days(a, -2)) for a, b, tau in self.ech.variable if jour0 < b <= jour1)
         return (1 if self.payeur else -1) * self.N * (flottant - self.K * fixe)
 
 
 def fixings_depot(cot: pd.DataFrame):
     """Hypothèse : fixing EURIBOR 6M du jour = cotation reconstituée du dépôt 6M de ce jour (les fixings sont sous
-    licence EMMI). Composante construite par hypothèse, présentée comme telle."""
+    licence EMMI). Composante construite par hypothèse, présentée comme telle.
+
+    Fixings antérieurs aux données (trois, mi-2025, swaps en cours de vie) : première cotation disponible.
+    """
     d = cot[cot.type == "DEPOT"].set_index("date").taux / 100
-    return lambda jour: float(d[jour])
+    return lambda jour: float(d[jour] if jour >= d.index[0] else d.iloc[0])
 
 
 def lire_portefeuille(path=PORTEFEUILLE) -> list[Swap]:

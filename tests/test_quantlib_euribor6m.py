@@ -11,7 +11,7 @@ import pytest
 
 from courbes import cotations as c
 from courbes import dates as dt
-from courbes.curves import courbe_estr, courbe_euribor6m
+from courbes.curves import courbe_estr, courbe_euribor6m, instrument_6m
 from courbes.instruments import IRS
 from ql_banc import courbe_estr as estr_ql, courbe_euribor6m as euribor6m_ql, jours_du_banc, q
 
@@ -51,3 +51,15 @@ def test_courbe_euribor6m_identique_a_quantlib(jour):
                                 fixedLegEndOfMonth=True, floatingLegEndOfMonth=True,
                                 discountingTermStructure=actu)
         assert abs(sw.fairRate() - IRS(debut, tenor).taux(nous.P, estr.P)) < TOL, (debut, tenor)
+
+
+def test_irs_2y_ecarte_meme_si_son_pilier_differe_d_un_jour():
+    """Sur 33 jours, la fin du FRA 18x24 et celle de l'IRS 2Y diffèrent d'un jour : garder les deux rend J quasi singulier."""
+    piliers = lambda j, k: instrument_6m(dt.add_business_days(j, 2), k).pilier  # noqa: E731
+    jour = next(j for j in sorted(COT.date.unique()) if piliers(j, "FRA 18x24") != piliers(j, "IRS 2Y"))
+    g = COT[COT.date == jour]
+    ois, p6 = g[g.type == "OIS"], g[g.type.isin(["DEPOT", "FRA", "IRS"])]
+    estr = courbe_estr(jour, dict(zip(ois.tenor, ois.taux)))
+    six = courbe_euribor6m(jour, dict(zip(p6.type + " " + p6.tenor, p6.taux)), estr)
+    assert not any(isinstance(i, IRS) and i.tenor == "2Y" for i in six.instruments)
+    assert min((b - a).days for a, b in zip(six.piliers, six.piliers[1:])) > 5

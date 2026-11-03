@@ -221,24 +221,30 @@ def courbe_estr(jour: date, cotations_ois: dict, classe=Courbe) -> Courbe:
     return c
 
 
+def instrument_6m(spot: date, cle: str):
+    """Instrument de calage 6M depuis sa clé de cotation ("DEPOT 6M", "FRA 1x7", "IRS 10Y")."""
+    typ, tenor = cle.split()
+    return Depot(spot) if typ == "DEPOT" else Depot(spot, int(tenor.split("x")[0])) if typ == "FRA" else IRS(spot, tenor)
+
+
 def courbe_euribor6m(jour: date, cotations: dict, estr: Courbe, classe=Courbe) -> Courbe:
     """Courbe de projection EURIBOR 6M, actualisée sur la courbe €STR.
 
-    `cotations` en % : {"DEPOT 6M": r, "FRA 1x7": r, ..., "IRS 2Y": r, ...}. Un instrument dont le pilier coïncide avec
-    celui d'un instrument plus court est écarté (en pratique l'IRS 2Y, même maturité que le FRA 18x24).
+    `cotations` en % : {"DEPOT 6M": r, "FRA 1x7": r, ..., "IRS 2Y": r, ...}. Un IRS dont le pilier tombe à 5 jours près sur
+    celui d'un dépôt / FRA est écarté (en pratique l'IRS 2Y, même maturité que le FRA 18x24).
     """
     spot = dt.add_business_days(jour, 2)
     tous = []
     for cle, v in cotations.items():
-        typ, tenor = cle.split()
-        i = Depot(spot) if typ == "DEPOT" else Depot(spot, int(tenor.split("x")[0])) if typ == "FRA" else IRS(spot, tenor)
-        tous.append((i.pilier, typ == "IRS", i, v))
-    instruments, q, vus = [], [], set()
-    for pilier, _, i, v in sorted(tous, key=lambda x: x[:2]):  # à pilier égal, le dépôt / FRA passe avant l'IRS
-        if pilier not in vus:
-            vus.add(pilier)
-            instruments.append(i)
-            q.append(v / 100)
+        i = instrument_6m(spot, cle)
+        tous.append((i.pilier, cle.startswith("IRS"), i, v))
+    retenus = []
+    for pilier, _, i, v in sorted(tous, key=lambda x: x[1]):  # dépôts / FRA d'abord, à pilier proche ils priment
+        # pilier "égal" à 5 jours près : selon le jour, la fin du FRA 18x24 et celle de l'IRS 2Y diffèrent d'un jour
+        if all(abs((pilier - p).days) > 5 for p, _, _ in retenus):
+            retenus.append((pilier, i, v))
+    retenus.sort(key=lambda x: x[0])
+    instruments, q = [i for _, i, _ in retenus], [v / 100 for _, _, v in retenus]
     c = newton(jour, instruments, q, actualisation=estr.P, classe=classe)
     c.instruments = instruments
     c.cotations = q  # décimal, dans l'ordre des instruments retenus

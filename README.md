@@ -17,7 +17,7 @@ Fiche projet : `projets-cv/fiches/pdf/09-courbes-taux-swaps.pdf` (dossier Applic
 | 6 | Hagan-West + leave-one-out | fait |
 | 7 | NSS | fait |
 | 8 | Pricer, buckets, couverture, IRRBB | fait |
-| 9 | PnL explain | à faire |
+| 9 | PnL explain | fait |
 | 10 | Démo, rapport, LinkedIn | à faire |
 
 ## Moteur de dates (`courbes/dates.py`)
@@ -199,6 +199,32 @@ mêmes buckets dans les deux interpolations. Le P10Y-2024 (échéance 15/03/2034
 28 % de ses |buckets| hors IRS 7Y/8Y en Hagan-West contre 9 % en log-linéaire, dont −5 257 EUR/bp sur l'IRS 9Y (0 en
 log-linéaire). C'est le prix de la meilleure interpolation constatée à l'étape 6 : une couverture Hagan-West mobilise
 plus d'instruments.
+
+## PnL explain (`courbes/pnl.py`, `etudes/pnl.py`)
+
+**Marché synthétique** : cotations reconstituées et bruitées, fixings EURIBOR 6M reconstitués. Le résultat valide la
+mécanique de décomposition, pas un comportement de marché.
+
+PnL(t → t+1) = portage + fixings + Σ_k bucket_k Δq_k + ½ Γ Δq̄² + résiduel :
+- **portage** : courbes de t portées en t+1 (P(d) / P(t+1)), traduites en cotations q_c et rebootstrapées ; fixings
+  tombés dans [t, t+1[ pris aux forwards ; flux payés inclus ;
+- **fixings** : écart des fixings publiés à ces forwards. **Composante construite par hypothèse** (fixings
+  reconstitués) ;
+- **delta** : buckets des courbes portées × (q_1 − q_c) ; **gamma** : gamma parallèle (±1 bp, rebootstrap) × Δq̄².
+
+Sur 254 jours en Hagan-West ([`etudes/pnl.md`](etudes/pnl.md), série dans
+[`etudes/pnl_serie.csv`](etudes/pnl_serie.csv)) : résiduel moyen 4,9 % du PnL moyen en valeur absolue, médiane
+jour par jour 3,2 %, 99,6 % de la variance du PnL expliquée. Le résiduel vient de la non-dérivabilité de Hagan-West
+(changement de région de la monotone convexe) : le témoin log-linéaire tombe à 0,26 %. Pire jour : le saut de base
+de l'IRS 10Y (2026-05-04). Par analogie seulement, c'est l'esprit du test d'attribution de PnL de FRTB (PnL
+théorique contre PnL des facteurs de risque).
+
+**Contrôles** (`tests/test_pnl.py`, deux interpolations) : résiduel nul en portage pur ; résiduel d'ordre 3 sur un
+choc parallèle connu (rapport 8 entre chocs de 10 et 5 bp) ; flux payés.
+
+L'étude a révélé un défaut corrigé : sur 33 jours, la fin du FRA 18x24 et celle de l'IRS 2Y diffèrent d'un jour, et
+la courbe 6M gardait les deux (jacobien quasi singulier, buckets de ±1 M EUR/bp qui se compensent). Un IRS à 5 jours
+près d'un pilier de FRA est désormais écarté.
 
 ## Lancer les tests
 
