@@ -12,6 +12,8 @@ dependencies = ["numpy", "pandas", "scipy"]
 
 [project.optional-dependencies]
 test = ["pytest", "QuantLib"]
+demo = ["streamlit"]
+rapport = ["matplotlib", "QuantLib"]
 
 [tool.setuptools]
 packages = ["courbes"]

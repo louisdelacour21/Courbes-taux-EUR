@@ -14,6 +14,6 @@ Stabilité jour à jour (cotations bruitées) : écart-type des variations quoti
 | Courbe | Δ zéro 10Y | Δ β0 (niveau) | Δ β1 (−pente) | Δ β2 (courbure) | Δ β3 | sauts de λ |
 |---|---|---|---|---|---|---|
 | €STR | 3.4 | 52.8 | 52.9 | 50.6 | 211.6 | 19 |
-| 6M | 3.5 | 75.8 | 76.5 | 81.7 | 288.9 | 32 |
+| 6M | 3.5 | 75.8 | 76.6 | 82.0 | 288.9 | 32 |
 
 Extrapolation à 40 ans, NSS moins forward plat prolongé (bp) : €STR moyenne -5.5, min -16.6, max +15.9 ; 6M moyenne -5.7, min -17.3, max +15.9

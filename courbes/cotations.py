@@ -168,3 +168,10 @@ if __name__ == "__main__":
         print(f"décalage €STR-AAA à {t:>5} an(s) : moyenne {np.mean(d):+.1f} bp, min {min(d):+.1f}, max {max(d):+.1f}")
     b = [v * 1e4 for m, v in bases_mensuelles(_marche()).items()]
     print(f"base EURIBOR 6M - OIS mensuelle : min {min(b):.1f} bp, max {max(b):.1f} bp")
+
+
+def du_jour(cot: pd.DataFrame, jour: date) -> tuple[dict, dict]:
+    """(cotations OIS, cotations 6M) du jour, en %, au format de `risque.construire`."""
+    g = cot[cot.date == jour]
+    o, s6 = g[g.type == "OIS"], g[g.type.isin(["DEPOT", "FRA", "IRS"])]
+    return dict(zip(o.tenor, o.taux)), dict(zip(s6.type + " " + s6.tenor, s6.taux))

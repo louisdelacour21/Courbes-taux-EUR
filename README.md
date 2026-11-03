@@ -18,7 +18,7 @@ Fiche projet : `projets-cv/fiches/pdf/09-courbes-taux-swaps.pdf` (dossier Applic
 | 7 | NSS | fait |
 | 8 | Pricer, buckets, couverture, IRRBB | fait |
 | 9 | PnL explain | fait |
-| 10 | Démo, rapport, LinkedIn | à faire |
+| 10 | Démo, synthèse du matin, rapport de validation | fait (mise en ligne à faire) |
 
 ## Moteur de dates (`courbes/dates.py`)
 
@@ -226,6 +226,36 @@ L'étude a révélé un défaut corrigé : sur 33 jours, la fin du FRA 18x24 et 
 la courbe 6M gardait les deux (jacobien quasi singulier, buckets de ±1 M EUR/bp qui se compensent). Un IRS à 5 jours
 près d'un pilier de FRA est désormais écarté.
 
+## Démo, synthèse du matin, rapport (`app/`, `courbes/synthese.py`, `etudes/rapport.py`)
+
+> Niveaux reconstitués depuis les données publiques BCE ; validation QuantLib indépendante de la provenance ;
+> études d'interpolation et PnL explain sur données synthétiques.
+
+**Démo Streamlit** : `streamlit run app/streamlit_app.py`. Onglets courbes (forwards 6M log-linéaire contre
+Hagan-West), risques (buckets, swaps, IRRBB), PnL explain (série précalculée), synthèse du matin, études de validation.
+Les courbes du jour choisi sont construites à la volée (quelques dixièmes de seconde) ; le PnL explain, 10 minutes de
+calcul, est lu dans `etudes/pnl_serie.csv`.
+
+**Synthèse du matin** : `python -m courbes.synthese [AAAA-MM-JJ]` (dernier jour par défaut). Valeur, DV01, trois plus
+gros piliers, PnL explain de la veille et alertes : |résiduel| > max(10 % du PnL, 10 000 EUR), ou cotation qui bouge de
+plus de 2 bp par rapport à la moyenne de ses deux voisines (mouvement isolé, comme le saut de base de l'IRS 10Y). **Temps
+de calcul mesuré : environ 3 s** (2,6 à 3,1 s selon les lancers : deux jours de courbes, buckets et décomposition du PnL). Au 2026-05-04, la synthèse lève
+l'alerte résiduel et les alertes IRS 9Y / IRS 10Y.
+
+**Rapport de validation** : `python etudes/rapport.py` produit `rapport/rapport_validation.pdf` (HTML converti par Edge
+headless). C'est une **auto-revue**, pas une validation indépendante au sens de SR 11-7. Le script recalcule chaque seuil
+chiffré : repricing (< 1e-13) et écarts aux facteurs d'actualisation QuantLib (< 1e-10) sur les jours du banc, pour les
+deux interpolations, puis la part du résiduel du PnL explain ; il reprend les études telles quelles.
+
+Derniers chiffres (38 jours du banc, 28 s) :
+
+| Interpolation | Repricing max | DF €STR max contre QuantLib | DF 6M max contre QuantLib |
+|---|---:|---:|---:|
+| Log-linéaire | 3,4e-14 | 4,5e-15 | 6,5e-14 |
+| Hagan-West | 9,5e-14 | 3,0e-13 | 1,4e-13 |
+
+PnL explain : 4,93 % (témoin log-linéaire 0,26 %) ; 30 jours sur 254 dépassent le seuil d'alerte du résiduel.
+
 ## Lancer les tests
 
 ```bash
@@ -233,4 +263,4 @@ python -m pip install -e ".[test]"
 python -m pytest
 ```
 
-Outils gratuits et open source uniquement (Python, NumPy, pandas, QuantLib, pytest) et données publiques BCE.
+Licence MIT (`LICENSE`). Outils gratuits et open source uniquement (Python, NumPy, pandas, QuantLib, pytest) et données publiques BCE.
