@@ -1,266 +1,264 @@
-# Courbes de taux EUR multi-courbes et pricer de swaps
+# Multi-curve EUR rate curves and swap pricer
 
-Bootstrapper une courbe d'actualisation €STR et une courbe de projection EURIBOR 6M, pricer un portefeuille
-de swaps (DV01, risques par pilier, PnL explain), le tout reproduit à l'identique par QuantLib.
+Bootstrap an €STR discount curve and a EURIBOR 6M projection curve, price a swap portfolio (DV01, pillar risks,
+PnL explain), all reproduced exactly by QuantLib.
 
-Fiche projet : `projets-cv/fiches/pdf/09-courbes-taux-swaps.pdf` (dossier Application Linkedin).
+## Progress
 
-## Avancement
+| # | Step | Status |
+|---|------|--------|
+| 1 | Date engine checked day by day against QuantLib (2000-2060) | done |
+| 2 | ECB data, reconstruction, `assumptions.md` | done |
+| 3 | Log-linear €STR curve, global Newton | done |
+| 4 | QuantLib €STR bench (gaps < 1e-10 in CI) | done |
+| 5 | EURIBOR 6M curve + QuantLib bench | done |
+| 6 | Hagan-West + leave-one-out | done |
+| 7 | NSS | done |
+| 8 | Pricer, buckets, hedging, IRRBB | done |
+| 9 | PnL explain | done |
+| 10 | Demo, morning briefing, validation report | done (online deployment pending) |
 
-| # | Étape | État |
-|---|-------|------|
-| 1 | Moteur de dates comparé jour par jour à QuantLib (2000-2060) | fait |
-| 2 | Données BCE, reconstitution, `hypotheses.md` | fait |
-| 3 | Courbe €STR log-linéaire, Newton global | fait |
-| 4 | Banc QuantLib €STR (écarts < 1e-10 en CI) | fait |
-| 5 | Courbe EURIBOR 6M + banc QuantLib | fait |
-| 6 | Hagan-West + leave-one-out | fait |
-| 7 | NSS | fait |
-| 8 | Pricer, buckets, couverture, IRRBB | fait |
-| 9 | PnL explain | fait |
-| 10 | Démo, synthèse du matin, rapport de validation | fait (mise en ligne à faire) |
+## Date engine (`ratecurves/dates.py`)
 
-## Moteur de dates (`courbes/dates.py`)
+- **TARGET2** calendar (weekends, 1 January, Good Friday, Easter Monday, 1 May, 25 and 26 December).
+- Business day conventions: following, modified following, preceding, modified preceding, unadjusted.
+- Tenors (`"2D"`, `"1W"`, `"6M"`, `"10Y"`) with the end-of-month rule.
+- Day counts: ACT/360, ACT/365F, 30/360 Bond Basis.
+- Schedules generated backwards from maturity (short front stub), with or without end of month.
 
-- Calendrier **TARGET2** (week-ends, 1er janvier, Vendredi saint, lundi de Pâques, 1er mai, 25 et 26 décembre).
-- Conventions de jour ouvré : following, modified following, preceding, modified preceding, non ajusté.
-- Ténors (`"2D"`, `"1W"`, `"6M"`, `"10Y"`) avec règle de fin de mois.
-- Décompte des jours : ACT/360, ACT/365F, 30/360 Bond Basis.
-- Échéanciers générés à rebours depuis la maturité (stub court en tête), avec ou sans fin de mois.
+**Validation** (`tests/test_dates.py`, 48 tests): comparison with QuantLib on every day from 2000 to 2060
+(business days, adjustments, month ends), on thousands of random tenors, date pairs and schedules (fixed seed).
+No gap tolerated.
 
-**Validation** (`tests/test_dates.py`, 48 tests) : comparaison à QuantLib sur chaque jour de 2000 à 2060
-(jours ouvrés, ajustements, fins de mois), sur des milliers de ténors, de paires de dates et
-d'échéanciers tirés au hasard (graine fixe). Aucun écart toléré.
+Behaviour difference noted: with the end-of-month rule, QuantLib 1.44 adjusts the intermediate dates from the last
+*calendar* day of the month; under following, a 31 October falling on a Sunday therefore becomes 1 November. The
+engine reproduces this behaviour.
 
-Écart de comportement noté : avec la règle de fin de mois, QuantLib 1.44 ajuste les dates intermédiaires
-à partir du dernier jour *calendaire* du mois ; en convention following, un 31 octobre tombant un dimanche
-devient donc le 1er novembre. Le moteur reproduit ce comportement.
+## Data (`ratecurves/ecb.py`, `ratecurves/quotes.py`)
 
-## Données (`courbes/donnees.py`, `courbes/cotations.py`)
+> Levels reconstructed on 2026-11-01; QuantLib validation independent of the data source; interpolation and PnL
+> explain studies on synthetic data.
 
-> Niveaux reconstitués le 01/11/2026 ; validation QuantLib indépendante de la provenance ; études d'interpolation
-> et PnL explain sur données synthétiques.
+`data/quotes.csv` holds one year of daily quotes (€STR, OIS 1W-30Y, 6M deposit, FRAs, IRS 2Y-30Y against 6M). They
+are reconstructed from free ECB series (AAA curve, €STR, monthly EURIBOR 6M), because no free source publishes swap
+quotes. Method, assumptions and estimated impact: [`assumptions.md`](assumptions.md). The same format accepts real
+quotes (`source = real`).
 
-`data/cotations.csv` contient un an de cotations quotidiennes (€STR, OIS 1W-30Y, dépôt 6M, FRA, IRS 2Y-30Y contre
-6M). Elles sont reconstituées à partir de séries BCE gratuites (courbe AAA, €STR, EURIBOR 6M mensuel), car aucune
-source gratuite ne publie de cotations de swaps. Méthode, hypothèses et impact estimé : [`hypotheses.md`](hypotheses.md).
-Le même format accepte de vraies cotations (`source = reel`).
+## €STR curve (`ratecurves/curves.py`, `ratecurves/instruments.py`)
 
-## Courbe €STR (`courbes/curves.py`, `courbes/instruments.py`)
+- Unknowns: x_k = ln P(T_k), one pillar per OIS (last relevant date = last payment, T+1 business day).
+- Log-linear interpolation in t = ACT/365F, flat forward beyond the last pillar.
+- **Global Newton** with an analytic Jacobian: the curve returns dual numbers (value + gradient) that the instrument
+  formulas propagate exactly. Stops at max|implied rate − quote| < 1e-13.
+- The Jacobian dR/dx is kept for the pillar risks (step 8).
 
-- Inconnues : x_k = ln P(T_k), un pilier par OIS (dernière date pertinente = dernier paiement, J+1 ouvré).
-- Interpolation log-linéaire en t = ACT/365F, forward constant au-delà du dernier pilier.
-- **Newton global** à jacobien analytique : la courbe renvoie des nombres duaux (valeur + gradient) que les
-  formules des instruments propagent exactement. Arrêt à max|taux implicite − cotation| < 1e-13.
-- Le jacobien dR/dx est conservé pour les risques par pilier (étape 8).
+**Validation** (`tests/test_curves.py`):
+- par repricing within 1e-13 on one day in ten of the quote year;
+- Jacobian equal to finite differences within 1e-6;
+- on noiseless quotes, the curve falls back on the generating curve at the pillars (~1e-6 up to 10 years).
+  Between two distant pillars (25-30 years), log-linear moves away from it by up to ~2e-3 in DF: this is what step 6
+  has to measure.
 
-**Validation** (`tests/test_curves.py`) :
-- repricing au pair à moins de 1e-13 sur un jour sur dix de l'année de cotations ;
-- jacobien égal aux différences finies à 1e-6 près ;
-- sur cotations non bruitées, la courbe retombe sur la courbe génératrice aux piliers (~1e-6 jusqu'à 10 ans).
-  Entre deux piliers éloignés (25-30 ans), le log-linéaire s'en écarte jusqu'à ~2e-3 en DF : c'est ce que
-  l'étape 6 doit mesurer.
+**QuantLib bench** (`tests/test_quantlib_estr.py`, tolerance 1e-10): the same curve is built with `OISRateHelper`
+(spot 2, payment T+1 MF TARGET, end of month, `LastRelevantDate` pillar) and `PiecewiseLogLinearDiscount` in ACT/365F
+(bootstrap accuracy 1e-14). The tested days are one in ten, every day whose spot falls on a month end, and the last
+one. For each, the bench compares:
+- the pillars;
+- the discount factors on 500 dates up to 40 years;
+- the par rates of the calibration instruments;
+- 200 random OIS (`MakeOIS.fairRate`, forward start up to 5 years, tenor from 1W to 30Y).
 
-**Banc QuantLib** (`tests/test_quantlib_estr.py`, écart toléré 1e-10) : la même courbe est construite avec
-`OISRateHelper` (spot 2, paiement J+1 MF TARGET, fin de mois, pilier `LastRelevantDate`) et
-`PiecewiseLogLinearDiscount` en ACT/365F (précision du bootstrap 1e-14). Les jours testés sont un sur dix, tous ceux dont le
-spot tombe en fin de mois, et le dernier. Pour chacun, le banc compare :
-- les piliers ;
-- les facteurs d'actualisation sur 500 dates jusqu'à 40 ans ;
-- les taux au pair des instruments de calage ;
-- 200 OIS aléatoires (`MakeOIS.fairRate`, départ décalé jusqu'à 5 ans, ténor de 1W à 30Y).
+Two conventions matter to get gaps of order 1e-15:
+- the schedule is generated from the **unadjusted** maturity (spot + tenor);
+- when the spot is the last business day of the month, the maturity moves to the last day of the month
+  (end-of-month rule).
 
-Deux conventions comptent pour obtenir des écarts de l'ordre de 1e-15 :
-- l'échéancier se génère depuis la maturité **non ajustée** (spot + ténor) ;
-- quand le spot est un dernier jour ouvré du mois, la maturité est reportée au dernier jour du mois (règle de fin de mois).
+## EURIBOR 6M curve (`euribor6m_curve`)
 
-## Courbe EURIBOR 6M (`courbe_euribor6m`)
+- Instruments: 6M deposit, FRAs 1x7 to 18x24 (ACT/360, MF end of month), IRS 3Y-30Y (annual fixed 30/360 Bond Basis,
+  semi-annual floating ACT/360, end of month, unadjusted maturity like the OIS).
+- The 2Y IRS is dropped: its pillar coincides with that of the 18x24 FRA (QuantLib also refuses two equal pillars).
+- Exogenous discounting on the €STR curve (EUR cash CSA); same global Newton, with the €STR curve held fixed.
+- "Par" floating coupon (QuantLib default setting): 6M forward over the accrual period.
 
-- Instruments : dépôt 6M, FRA 1x7 à 18x24 (ACT/360, MF fin de mois), IRS 3Y-30Y (fixe annuel 30/360 Bond Basis,
-  variable semestriel ACT/360, fin de mois, maturité non ajustée comme l'OIS).
-- L'IRS 2Y est écarté : son pilier coïncide avec celui du FRA 18x24 (QuantLib refuse aussi deux piliers égaux).
-- Actualisation exogène sur la courbe €STR (CSA cash EUR) ; même Newton global, la courbe €STR restant fixe.
-- Coupon variable « au pair » (réglage par défaut de QuantLib) : forward 6M sur la période de calcul.
+**QuantLib bench** (`tests/test_quantlib_euribor6m.py`, tolerance 1e-10, same days as the €STR bench):
+`DepositRateHelper`, `FraRateHelper`, `SwapRateHelper` discounted on the QuantLib €STR curve. The bench compares the
+pillars, the 6M discount factors on 500 dates, the par rates and 200 random swaps (`MakeVanillaSwap.fairRate`, forward
+start up to 5 years, tenor from 1 to 30 years). Observed gaps of order 1e-15.
 
-**Banc QuantLib** (`tests/test_quantlib_euribor6m.py`, écart toléré 1e-10, mêmes jours que le banc €STR) :
-`DepositRateHelper`, `FraRateHelper`, `SwapRateHelper` actualisé sur la courbe €STR QuantLib. Le banc compare les piliers,
-les facteurs d'actualisation 6M sur 500 dates, les taux au pair et 200 swaps aléatoires (`MakeVanillaSwap.fairRate`,
-départ décalé jusqu'à 5 ans, ténor de 1 à 30 ans). Écarts observés de l'ordre de 1e-15.
+## Hagan-West and the interpolation choice (`CurveHW`, `studies/leave_one_out.py`)
 
-## Hagan-West et choix d'interpolation (`CourbeHW`, `etudes/leave_one_out.py`)
+**Monotone convex Hagan-West** (Hagan & West, 2006), on the same unknowns x_k = ln P(T_k):
+- continuous instantaneous forward; ∫f preserved on each interval (the DFs at the pillars are exactly exp(x_k));
+- four regions depending on the gap between the node forward and the discrete forward, no oscillation;
+- **positivity constraint switched off**: useless with positive rates, harmful with negative rates;
+- beyond the last pillar, the last discrete forward is extended, as in log-linear and in QuantLib;
+- global Newton started from the log-linear solution (identical to the sequential bootstrap), stops at 1e-13.
+  €STR curve build: ~0.15 s.
 
-**Hagan-West monotone convexe** (Hagan & West, 2006), sur les mêmes inconnues x_k = ln P(T_k) :
-- forward instantané continu ; ∫f conservée sur chaque intervalle (les DF aux piliers valent exactement exp(x_k)) ;
-- quatre régions selon l'écart du forward aux nœuds au forward discret, sans oscillation ;
-- **contrainte de positivité désactivée** : inutile en taux positifs, nuisible en taux négatifs ;
-- au-delà du dernier pilier, le dernier forward discret est prolongé, comme en log-linéaire et dans QuantLib ;
-- Newton global démarré sur la solution log-linéaire (identique au bootstrap séquentiel), arrêt à 1e-13.
-  Construction de la courbe €STR : ~0,15 s.
+The Jacobian stays analytic (dual numbers), but Hagan-West is not differentiable at the region boundaries. At the
+short end, the gaps g are ~1e-6: a 1e-6 bump changes region, and finite differences move away from the Jacobian. The
+test therefore uses a 1e-9 bump.
 
-Le jacobien reste analytique (nombres duaux), mais Hagan-West n'est pas dérivable aux frontières de régions. À court
-terme, les écarts g valent ~1e-6 : un choc de 1e-6 change de région, et les différences finies s'écartent du jacobien.
-Le test utilise donc un choc de 1e-9.
+**QuantLib bench** (`tests/test_hagan_west.py`): `PiecewiseConvexMonotoneForward` with
+`ConvexMonotone(quadraticity=0, monotonicity=1, forcePositive=False)` reproduces our €STR and 6M curves to ~1e-14.
+The tolerance did not need to be loosened: it stays at 1e-10. With the QuantLib default settings (0.3 / 0.7 / forced
+positivity), the gap rises to ~1e-4 in DF: the "pure" method of the paper is not the QuantLib default.
 
-**Banc QuantLib** (`tests/test_hagan_west.py`) : `PiecewiseConvexMonotoneForward` avec
-`ConvexMonotone(quadraticity=0, monotonicity=1, forcePositive=False)` reproduit nos courbes €STR et 6M à ~1e-14.
-La tolérance n'a pas eu besoin d'être relâchée : elle reste à 1e-10. Avec les réglages par défaut de QuantLib
-(0,3 / 0,7 / positivité forcée), l'écart monte à ~1e-4 en DF : la méthode « pure » de l'article n'est pas le défaut de QuantLib.
+Other tests:
+- G(1) = 0, g(0) = g0 and g(1) = g1 in the four regions;
+- exact flat curve;
+- preservation of ∫f, continuity at the nodes and positive forward on the paper's data set. That data set (zeros at
+  0.1 / 1 / 4 / 9 / 20 / 30 years) is taken from memory and has not been checked against the published tables.
 
-Autres tests :
-- G(1) = 0, g(0) = g0 et g(1) = g1 dans les quatre régions ;
-- courbe plate exacte ;
-- conservation de ∫f, continuité aux nœuds et forward positif sur le jeu de l'article. Ce jeu (zéros à 0,1 / 1 / 4 /
-  9 / 20 / 30 ans) est repris de mémoire et n'a pas été vérifié contre les tableaux publiés.
+**Leave-one-out** ([`studies/leave_one_out.md`](studies/leave_one_out.md)): 30 days (one in ten + the 5 days of the
+10Y IRS basis jump), noisy quotes. For each day, each inner instrument is removed, the curve is rebuilt, then the
+pricing error of the removed instrument is measured. Gaps in bp:
 
-**Leave-one-out** ([`etudes/leave_one_out.md`](etudes/leave_one_out.md)) : 30 jours (un sur dix + les 5 jours du
-saut de base de l'IRS 10Y), cotations bruitées. Pour chaque jour, chaque instrument intérieur est retiré, la courbe est
-reconstruite, puis l'erreur de pricing de l'instrument retiré est mesurée. Écarts en bp :
-
-| Courbe | Interpolation | Moyenne | Max | Rugosité (bp²/an) |
+| Curve | Interpolation | Mean | Max | Roughness (bp²/year) |
 |---|---|---|---|---|
-| €STR | log-linéaire | 1,36 | 5,46 | 4,7 |
-| €STR | Hagan-West | **0,32** | **1,37** | **0,7** |
-| 6M | log-linéaire | 2,02 | 12,69 | 8,9 |
-| 6M | Hagan-West | **0,62** | **3,70** | **1,1** |
+| €STR | log-linear | 1.36 | 5.46 | 4.7 |
+| €STR | Hagan-West | **0.32** | **1.37** | **0.7** |
+| 6M | log-linear | 2.02 | 12.69 | 8.9 |
+| 6M | Hagan-West | **0.62** | **3.70** | **1.1** |
 
-**Choix de production : Hagan-West.** L'erreur moyenne est divisée par 3 à 4 et le maximum par 3 à 4. Le gain le plus
-net porte sur les FRA (6x12 à 18x24 : 5 bp contre 1 bp en moyenne). La rugosité est divisée par 6 à 8.
+**Production choice: Hagan-West.** The mean error is divided by 3 to 4 and the maximum by 3 to 4. The clearest gain
+is on the FRAs (6x12 to 18x24: 5 bp against 1 bp on average). Roughness is divided by 6 to 8.
 
-Deux réserves :
-- Les cotations dérivent d'une courbe Svensson lisse, ce qui avantage une interpolation lisse. Le classement reste à
-  confirmer sur de vraies cotations.
-- Hagan-West n'est pas locale. Les jours du saut, l'IRS 10Y retiré est moins bien repricé (max 3,1 bp contre 2,4 bp) :
-  le saut se diffuse aux voisins. La non-localité des buckets est mesurée à l'étape 8 (section suivante) ; le log-linéaire
-  reste disponible (`classe=Courbe`).
+Two caveats:
+- The quotes derive from a smooth Svensson curve, which favours a smooth interpolation. The ranking remains to be
+  confirmed on real quotes.
+- Hagan-West is not local. On the jump days, the removed 10Y IRS is repriced less well (max 3.1 bp against 2.4 bp):
+  the jump spreads to the neighbours. The non-locality of the buckets is measured in step 8 (next section); log-linear
+  remains available (`cls=Curve`).
 
-## NSS (`courbes/nss.py`, `etudes/nss.py`)
+## NSS (`ratecurves/nss.py`, `studies/nss.py`)
 
-Nelson-Siegel-Svensson, formule de la BCE, taux zéro en capitalisation continue :
-y(τ) = β0 + β1 L(τ/λ1) + β2 [L(τ/λ1) − e^{−τ/λ1}] + β3 [L(τ/λ2) − e^{−τ/λ2}], avec L(u) = (1 − e^{−u})/u.
-**Usage : lissage, lecture niveau / pente / courbure et extrapolation, jamais pricing** (le pricing reste sur les
-courbes bootstrapées, qui repricent les instruments à 1e-13).
+Nelson-Siegel-Svensson, ECB formula, continuously compounded zero rates:
+y(τ) = β0 + β1 L(τ/λ1) + β2 [L(τ/λ1) − e^{−τ/λ1}] + β3 [L(τ/λ2) − e^{−τ/λ2}], with L(u) = (1 − e^{−u})/u.
+**Use: smoothing, reading level / slope / curvature and extrapolation, never pricing** (pricing stays on the
+bootstrapped curves, which reprice the instruments to 1e-13).
 
-- β par moindres carrés ordinaires à (λ1, λ2) fixés ; (λ1, λ2) par une grille de départ puis `scipy.optimize.least_squares`.
-- Contraintes d'identification : 2 λ1 ≤ λ2 ≤ 30 ans (ordre de la BCE : τ1 ≈ 3 ans, τ2 ≈ 13 ans). Sans elles, l'optimum
-  glisse vers λ1 ≈ λ2 : les deux bosses deviennent colinéaires et β2 ≈ −β3 atteint ±1e3, pour le même RMSE.
+- β by ordinary least squares at fixed (λ1, λ2); (λ1, λ2) by a starting grid then `scipy.optimize.least_squares`.
+- Identification constraints: 2 λ1 ≤ λ2 ≤ 30 years (ECB orders of magnitude: τ1 ≈ 3 years, τ2 ≈ 13 years). Without
+  them, the optimum slides towards λ1 ≈ λ2: the two humps become collinear and β2 ≈ −β3 reaches ±1e3, for the same RMSE.
 
-**Contrôle de la formule** (`tests/test_nss.py`) : les taux zéro BCE publiés (séries SR_3M, 1Y, 5Y, 10Y, 30Y, un an)
-sont reproduits depuis les paramètres BCE à moins de 0,01 bp. Ce contrôle valide la formule, pas l'ajustement. S'y
-ajoutent un aller-retour sans bruit (paramètres retrouvés, zéros à 1e-7 jusqu'à 40 ans) et un bruit de 1 bp
-correctement mesuré par le RMSE.
+**Formula check** (`tests/test_nss.py`): the published ECB zero rates (series SR_3M, 1Y, 5Y, 10Y, 30Y, one year) are
+reproduced from the ECB parameters within 0.01 bp. This check validates the formula, not the fit. On top of it: a
+noiseless round trip (parameters recovered, zeros within 1e-7 up to 40 years) and 1 bp of noise correctly measured by
+the RMSE.
 
-**Ajustement aux zéros bootstrapés** ([`etudes/nss.md`](etudes/nss.md)) : chaque jour, NSS est ajusté aux zéros
-Hagan-West des piliers €STR et 6M.
+**Fit to the bootstrapped zeros** ([`studies/nss.md`](studies/nss.md)): each day, NSS is fitted to the Hagan-West
+zeros of the €STR and 6M pillars.
 
-| Courbe | Cotations | RMSE moyen (bp) | RMSE max (bp) | Résidu max (bp) |
+| Curve | Quotes | Mean RMSE (bp) | Max RMSE (bp) | Max residual (bp) |
 |---|---|---|---|---|
-| €STR | bruitées | 0,55 | 1,86 | 6,17 |
-| 6M | bruitées | 0,67 | 1,87 | 6,02 |
-| €STR | sans bruit (1 jour sur 10) | 0,44 | 1,61 | 5,46 |
-| 6M | sans bruit (1 jour sur 10) | 0,50 | 1,70 | 5,34 |
+| €STR | noisy | 0.55 | 1.86 | 6.17 |
+| 6M | noisy | 0.67 | 1.87 | 6.02 |
+| €STR | noiseless (1 day in 10) | 0.44 | 1.61 | 5.46 |
+| 6M | noiseless (1 day in 10) | 0.50 | 1.70 | 5.34 |
 
-- Même sans bruit, le RMSE reste à ~0,5 bp : les zéros bootstrapés ne sont pas exactement une courbe Svensson. Le bruit
-  n'ajoute que ~0,1 à 0,2 bp. Le RMSE mesure donc surtout l'erreur de forme de NSS ; les résidus max (5-6 bp) montrent
-  pourquoi NSS ne doit pas servir au pricing.
-- **Stabilité** : le zéro 10 ans bootstrapé varie de 3,4 bp par jour (écart-type), mais les β varient de 50 à 290 bp et un
-  λ saute de plus de 50 % un jour sur dix environ (19 jours en €STR, 32 en 6M). Les contraintes ont divisé ces sauts par
-  3 (59 et 79 sans contraintes) et ramené les variations de β de ~1e8 bp à ~1e2 bp, pour +0,1 bp de RMSE. Les paramètres
-  restent trop instables pour être lus seuls au jour le jour.
-- **Extrapolation à 40 ans** : NSS est en moyenne 5,5 bp sous le dernier forward prolongé des courbes bootstrapées
-  (de −17 à +16 bp selon les jours).
+- Even without noise, the RMSE stays at ~0.5 bp: the bootstrapped zeros are not exactly a Svensson curve. Noise only
+  adds ~0.1 to 0.2 bp. The RMSE therefore mostly measures NSS's shape error; the max residuals (5-6 bp) show why NSS
+  must not be used for pricing.
+- **Stability**: the bootstrapped 10-year zero moves by 3.4 bp a day (standard deviation), but the β move by 50 to
+  290 bp and a λ jumps by more than 50% about one day in ten (19 days for €STR, 32 for 6M). The constraints divided
+  these jumps by 3 (59 and 79 without constraints) and brought the β changes from ~1e8 bp down to ~1e2 bp, for +0.1 bp
+  of RMSE. The parameters remain too unstable to be read on their own day to day.
+- **Extrapolation at 40 years**: NSS is on average 5.5 bp below the extended last forward of the bootstrapped curves
+  (from −17 to +16 bp depending on the day).
 
-## Pricer et risques (`courbes/pricing.py`, `courbes/risque.py`, `etudes/risque.py`)
+## Pricer and risks (`ratecurves/pricing.py`, `ratecurves/risk.py`, `studies/risk.py`)
 
-Swap payeur : V = N [Σ τ_j F_j Pd(t_j) − K Σ τ_i Pd(t_i)], F_j projeté sur la courbe 6M, actualisation €STR. Le
-portefeuille (`data/portefeuille.csv`) compte dix swaps : payeurs et receveurs, départs décalés, swaps en cours de vie.
-**Les fixings EURIBOR 6M passés sont construits par hypothèse** : cotation DEPOT 6M reconstituée du jour de fixing.
+Payer swap: V = N [Σ τ_j F_j Pd(t_j) − K Σ τ_i Pd(t_i)], F_j projected on the 6M curve, €STR discounting. The
+portfolio (`data/portfolio.csv`) holds ten swaps: payers and receivers, forward starts, seasoned swaps.
+**Past EURIBOR 6M fixings are built by assumption**: reconstructed DEPOSIT 6M quote of the fixing day.
 
-- **Buckets** : ∂V/∂q = (∂V/∂x) J⁻¹, avec J = ∂R/∂x le jacobien global des deux courbes (x = [x_€STR, x_6M],
-  triangulaire par blocs), obtenu par nombres duaux. Résultat en EUR par bp de cotation, en 0,1 s.
-- **DV01** publié deux fois : par cotations (±1 bp, rebootstrap complet) et par taux zéro (+1 bp sur les zéros des
-  deux courbes). Ils diffèrent d'environ 4 % (36 256 contre 37 593 EUR/bp).
-- **Couverture** : h = −B⁻¹δ en instruments de calage au pair ; B est diagonale (annuité × 1 bp), calculée sans le
-  supposer. Résidu ~1e-12 EUR/bp.
-- **IRRBB** (BCBS 2016, EUR) : six chocs sur les taux zéro des deux courbes, plancher EBA post-choc
-  max(r + Δ, min(r, −150 + 3t bp)), revalorisation complète. Pire scénario : parallèle bas, ΔEVE −9,6 M€. Les chocs par
-  maturité sont exportés pour le projet 04 (stress tests) : [`etudes/chocs_irrbb.yaml`](etudes/chocs_irrbb.yaml).
+- **Buckets**: ∂V/∂q = (∂V/∂x) J⁻¹, with J = ∂R/∂x the global Jacobian of both curves (x = [x_€STR, x_6M],
+  block triangular), obtained with dual numbers. Result in EUR per bp of quote, in 0.1 s.
+- **DV01** published twice: by quotes (±1 bp, full rebootstrap) and by zero rates (+1 bp on the zeros of both
+  curves). They differ by about 4% (36,256 against 37,593 EUR/bp).
+- **Hedging**: h = −B⁻¹δ in calibration instruments at par; B is diagonal (annuity × 1 bp), computed without assuming
+  it. Residual ~1e-12 EUR/bp.
+- **IRRBB** (BCBS 2016, EUR): six shocks on the zero rates of both curves, post-shock EBA floor
+  max(r + Δ, min(r, −150 + 3t bp)), full revaluation. Worst scenario: parallel down, ΔEVE −EUR 9.6m. The shocks per
+  maturity are exported for project 04 (stress tests): [`studies/irrbb_shocks.yaml`](studies/irrbb_shocks.yaml).
 
-**Contrôles** (`tests/test_risque.py`, en log-linéaire et Hagan-West) :
-- swap au pair à 1e-10 × N ;
-- NPV des dix swaps identiques à QuantLib (`MakeVanillaSwap`, `DiscountingSwapEngine`) à 1e-10 × N ;
-- buckets égaux aux bumps de cotation (1e-7 relatif en log-linéaire). En Hagan-West, l'écart va jusqu'à ~1e-5 relatif :
-  l'interpolation n'est pas dérivable aux frontières de ses régions ;
-- Σ buckets = DV01 parallèle à 1e-3 ;
-- portefeuille couvert à buckets nuls ;
-- formules des chocs et du plancher.
+**Checks** (`tests/test_risk.py`, in log-linear and Hagan-West):
+- swap at par within 1e-10 × N;
+- NPVs of the ten swaps identical to QuantLib (`MakeVanillaSwap`, `DiscountingSwapEngine`) within 1e-10 × N;
+- buckets equal to quote bumps (1e-7 relative in log-linear). In Hagan-West, the gap goes up to ~1e-5 relative: the
+  interpolation is not differentiable at the boundaries of its regions;
+- Σ buckets = parallel DV01 within 1e-3;
+- hedged portfolio with zero buckets;
+- shock and floor formulas.
 
-**Localité** ([`etudes/risque.md`](etudes/risque.md)) : un swap spot de ténor coté a ses dates sur les piliers, donc
-mêmes buckets dans les deux interpolations. Le P10Y-2024 (échéance 15/03/2034, entre les piliers 7Y et 8Y) répartit
-28 % de ses |buckets| hors IRS 7Y/8Y en Hagan-West contre 9 % en log-linéaire, dont −5 257 EUR/bp sur l'IRS 9Y (0 en
-log-linéaire). C'est le prix de la meilleure interpolation constatée à l'étape 6 : une couverture Hagan-West mobilise
-plus d'instruments.
+**Locality** ([`studies/risk.md`](studies/risk.md)): a spot swap of quoted tenor has its dates on the pillars, hence
+the same buckets under both interpolations. P10Y-2024 (maturity 2034-03-15, between the 7Y and 8Y pillars) puts 28% of
+its |buckets| outside IRS 7Y/8Y in Hagan-West against 9% in log-linear, including −5,257 EUR/bp on the 9Y IRS (0 in
+log-linear). This is the price of the better interpolation found in step 6: a Hagan-West hedge uses more instruments.
 
-## PnL explain (`courbes/pnl.py`, `etudes/pnl.py`)
+## PnL explain (`ratecurves/pnl.py`, `studies/pnl.py`)
 
-**Marché synthétique** : cotations reconstituées et bruitées, fixings EURIBOR 6M reconstitués. Le résultat valide la
-mécanique de décomposition, pas un comportement de marché.
+**Synthetic market**: reconstructed noisy quotes, reconstructed EURIBOR 6M fixings. The result validates the
+decomposition mechanics, not market behaviour.
 
-PnL(t → t+1) = portage + fixings + Σ_k bucket_k Δq_k + ½ Γ Δq̄² + résiduel :
-- **portage** : courbes de t portées en t+1 (P(d) / P(t+1)), traduites en cotations q_c et rebootstrapées ; fixings
-  tombés dans [t, t+1[ pris aux forwards ; flux payés inclus ;
-- **fixings** : écart des fixings publiés à ces forwards. **Composante construite par hypothèse** (fixings
-  reconstitués) ;
-- **delta** : buckets des courbes portées × (q_1 − q_c) ; **gamma** : gamma parallèle (±1 bp, rebootstrap) × Δq̄².
+PnL(t → t+1) = carry + fixings + Σ_k bucket_k Δq_k + ½ Γ Δq̄² + residual:
+- **carry**: curves of t carried to t+1 (P(d) / P(t+1)), turned into quotes q_c and rebootstrapped; fixings falling
+  in [t, t+1[ taken at the forwards; paid cash flows included;
+- **fixings**: gap between the published fixings and those forwards. **Component built by assumption**
+  (reconstructed fixings);
+- **delta**: buckets of the carried curves × (q_1 − q_c); **gamma**: parallel gamma (±1 bp, rebootstrap) × Δq̄².
 
-Sur 254 jours en Hagan-West ([`etudes/pnl.md`](etudes/pnl.md), série dans
-[`etudes/pnl_serie.csv`](etudes/pnl_serie.csv)) : résiduel moyen 4,9 % du PnL moyen en valeur absolue, médiane
-jour par jour 3,2 %, 99,6 % de la variance du PnL expliquée. Le résiduel vient de la non-dérivabilité de Hagan-West
-(changement de région de la monotone convexe) : le témoin log-linéaire tombe à 0,26 %. Pire jour : le saut de base
-de l'IRS 10Y (2026-05-04). Par analogie seulement, c'est l'esprit du test d'attribution de PnL de FRTB (PnL
-théorique contre PnL des facteurs de risque).
+Over 254 days in Hagan-West ([`studies/pnl.md`](studies/pnl.md), series in
+[`studies/pnl_series.csv`](studies/pnl_series.csv)): mean residual 4.9% of the mean absolute PnL, day-by-day median
+3.2%, 99.6% of the PnL variance explained. The residual comes from the non-differentiability of Hagan-West (region
+changes of the monotone convex scheme): the log-linear twin drops to 0.26%. Worst day: the 10Y IRS basis jump
+(2026-05-04). By analogy only, this is the spirit of the FRTB PnL attribution test (hypothetical PnL against risk
+theoretical PnL).
 
-**Contrôles** (`tests/test_pnl.py`, deux interpolations) : résiduel nul en portage pur ; résiduel d'ordre 3 sur un
-choc parallèle connu (rapport 8 entre chocs de 10 et 5 bp) ; flux payés.
+**Checks** (`tests/test_pnl.py`, both interpolations): zero residual under pure carry; third-order residual on a
+known parallel shock (ratio 8 between 10 and 5 bp shocks); paid cash flows.
 
-L'étude a révélé un défaut corrigé : sur 33 jours, la fin du FRA 18x24 et celle de l'IRS 2Y diffèrent d'un jour, et
-la courbe 6M gardait les deux (jacobien quasi singulier, buckets de ±1 M EUR/bp qui se compensent). Un IRS à 5 jours
-près d'un pilier de FRA est désormais écarté.
+The study revealed a defect, now fixed: on 33 days, the end of the 18x24 FRA and that of the 2Y IRS differ by one day,
+and the 6M curve kept both (near-singular Jacobian, offsetting buckets of ±EUR 1m/bp). An IRS within 5 days of a FRA
+pillar is now dropped.
 
-## Démo, synthèse du matin, rapport (`app/`, `courbes/synthese.py`, `etudes/rapport.py`)
+## Demo, morning briefing, report (`app/`, `ratecurves/briefing.py`, `studies/report.py`)
 
-> Niveaux reconstitués depuis les données publiques BCE ; validation QuantLib indépendante de la provenance ;
-> études d'interpolation et PnL explain sur données synthétiques.
+> Levels reconstructed from public ECB data; QuantLib validation independent of the data source; interpolation and
+> PnL explain studies on synthetic data.
 
-**Démo Streamlit** : `streamlit run app/streamlit_app.py`. Onglets courbes (forwards 6M log-linéaire contre
-Hagan-West), risques (buckets, swaps, IRRBB), PnL explain (série précalculée), synthèse du matin, études de validation.
-Les courbes du jour choisi sont construites à la volée (quelques dixièmes de seconde) ; le PnL explain, 10 minutes de
-calcul, est lu dans `etudes/pnl_serie.csv`.
+**Streamlit demo**: `streamlit run app/streamlit_app.py`. Tabs for curves (6M forwards, log-linear against
+Hagan-West), risk (buckets, swaps, IRRBB), PnL explain (precomputed series), morning briefing and validation studies.
+The curves of the chosen day are built on the fly (a few tenths of a second); the PnL explain, 10 minutes of
+computation, is read from `studies/pnl_series.csv`.
 
-**Synthèse du matin** : `python -m courbes.synthese [AAAA-MM-JJ]` (dernier jour par défaut). Valeur, DV01, trois plus
-gros piliers, PnL explain de la veille et alertes : |résiduel| > max(10 % du PnL, 10 000 EUR), ou cotation qui bouge de
-plus de 2 bp par rapport à la moyenne de ses deux voisines (mouvement isolé, comme le saut de base de l'IRS 10Y). **Temps
-de calcul mesuré : environ 3 s** (2,6 à 3,1 s selon les lancers : deux jours de courbes, buckets et décomposition du PnL). Au 2026-05-04, la synthèse lève
-l'alerte résiduel et les alertes IRS 9Y / IRS 10Y.
+**Morning briefing**: `python -m ratecurves.briefing [YYYY-MM-DD]` (last day by default). Value, DV01, three largest
+pillars, previous day's PnL explain and alerts: |residual| > max(10% of PnL, EUR 10,000), or a quote moving by more
+than 2 bp relative to the mean of its two neighbours (isolated move, like the 10Y IRS basis jump). **Measured run
+time: about 3 s** (2.6 to 3.1 s depending on the run: two days of curves, buckets and PnL decomposition). On
+2026-05-04, the briefing raises the residual alert and the IRS 9Y / IRS 10Y alerts.
 
-**Rapport de validation** : `python etudes/rapport.py` produit `rapport/rapport_validation.pdf` (HTML converti par Edge
-headless). C'est une **auto-revue**, pas une validation indépendante au sens de SR 11-7. Le script recalcule chaque seuil
-chiffré : repricing (< 1e-13) et écarts aux facteurs d'actualisation QuantLib (< 1e-10) sur les jours du banc, pour les
-deux interpolations, puis la part du résiduel du PnL explain ; il reprend les études telles quelles.
+**Validation report**: `python studies/report.py` writes `report/validation_report.pdf` (HTML converted by headless
+Edge). It is a **self-review**, not an independent validation in the SR 11-7 sense. The script recomputes every
+numerical threshold: repricing (< 1e-13) and gaps to the QuantLib discount factors (< 1e-10) on the bench days, for
+both interpolations, then the share of the PnL explain residual; it includes the studies as is.
 
-Derniers chiffres (38 jours du banc, 28 s) :
+Latest figures (38 bench days, 28 s):
 
-| Interpolation | Repricing max | DF €STR max contre QuantLib | DF 6M max contre QuantLib |
+| Interpolation | Max repricing | Max €STR DF against QuantLib | Max 6M DF against QuantLib |
 |---|---:|---:|---:|
-| Log-linéaire | 3,4e-14 | 4,5e-15 | 6,5e-14 |
-| Hagan-West | 9,5e-14 | 3,0e-13 | 1,4e-13 |
+| Log-linear | 3.4e-14 | 4.5e-15 | 6.5e-14 |
+| Hagan-West | 9.5e-14 | 3.0e-13 | 1.4e-13 |
 
-PnL explain : 4,93 % (témoin log-linéaire 0,26 %) ; 30 jours sur 254 dépassent le seuil d'alerte du résiduel.
+PnL explain: 4.93% (log-linear twin 0.26%); 30 days out of 254 exceed the residual alert threshold.
 
-## Lancer les tests
+## Running the tests
 
 ```bash
 python -m pip install -e ".[test]"
 python -m pytest
 ```
 
-Licence MIT (`LICENSE`). Outils gratuits et open source uniquement (Python, NumPy, pandas, QuantLib, pytest) et données publiques BCE.
+MIT licence (`LICENSE`). Free and open-source tools only (Python, NumPy, pandas, QuantLib, pytest) and public ECB data.

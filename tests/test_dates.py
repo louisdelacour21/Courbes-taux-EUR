@@ -1,11 +1,11 @@
-"""Le moteur de dates doit reproduire QuantLib au jour près sur 2000-2060."""
+"""The date engine must reproduce QuantLib to the day over 2000-2060."""
 import random
 from datetime import date, timedelta
 
 import pytest
 import QuantLib as ql
 
-from courbes import dates as D
+from ratecurves import dates as D
 
 START, END = date(2000, 1, 1), date(2060, 12, 31)
 ALL_DAYS = [START + timedelta(days=i) for i in range((END - START).days + 1)]
@@ -31,7 +31,7 @@ def random_day(lo=START, hi=END):
 def test_easter_against_known_dates():
     assert D.easter_sunday(2024) == date(2024, 3, 31)
     assert D.easter_sunday(2025) == date(2025, 4, 20)
-    assert D.easter_sunday(2038) == date(2038, 4, 25)  # Pâques la plus tardive possible
+    assert D.easter_sunday(2038) == date(2038, 4, 25)  # latest possible Easter
 
 
 def test_business_days_every_day():
@@ -59,7 +59,7 @@ def test_advance(tenor, eom):
     diff = []
     for d in ALL_DAYS[::7] + [D.last_day_of_month(x) for x in ALL_DAYS[::28]]:
         if d.year > 2030 and unit == "Y" and n >= 30:
-            continue  # sortirait de la plage testée
+            continue  # would leave the tested range
         ours = D.advance(d, tenor, "MF", eom)
         ref = py(TARGET.advance(q(d), ql.Period(n, UNITS[unit]), ql.ModifiedFollowing, eom))
         if ours != ref:
@@ -74,7 +74,7 @@ def test_advance(tenor, eom):
 ])
 def test_year_fraction(basis, qdc):
     pairs = [(random_day(), random_day()) for _ in range(20_000)]
-    # cas limites du 30/360 : fins de mois et février
+    # 30/360 edge cases: month ends and February
     pairs += [(D.last_day_of_month(date(y, m, 1)), D.last_day_of_month(date(y2, m2, 1)))
               for y, y2 in [(2023, 2024), (2024, 2025)] for m in range(1, 13) for m2 in range(1, 13)]
     for d1, d2 in pairs:
@@ -90,7 +90,7 @@ def test_schedule(conv, eom):
         if rng.random() < 0.3:
             eff = D.last_day_of_month(eff) - timedelta(days=rng.randrange(3))
         years = rng.choice([1, 2, 3, 5, 7, 10, 15, 20, 30])
-        months = rng.choice([0, 0, 0, 1, 4, 7])  # stub court en tête une fois sur deux
+        months = rng.choice([0, 0, 0, 1, 4, 7])  # short front stub one time in two
         term = D.add_months(eff, 12 * years + months)
         if eom and rng.random() < 0.5:
             term = D.last_day_of_month(term)
@@ -101,7 +101,7 @@ def test_schedule(conv, eom):
                                           CONV[conv], CONV[conv], ql.DateGeneration.Backward, eom)]
         if ours != ref:
             diff.append((eff, term, tenor, ours[:3], ref[:3]))
-    assert diff == [], f"{len(diff)} écarts, ex. {diff[:3]}"
+    assert diff == [], f"{len(diff)} mismatches, e.g. {diff[:3]}"
 
 
 def test_bad_inputs():

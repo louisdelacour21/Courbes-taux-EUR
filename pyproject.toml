@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "courbes-taux"
+name = "ratecurves"
 version = "0.0.1"
-description = "Courbes de taux EUR multi-courbes (€STR / EURIBOR 6M) et pricer de swaps, validés contre QuantLib"
+description = "Multi-curve EUR rate curves (€STR / EURIBOR 6M) and swap pricer, validated against QuantLib"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = ["numpy", "pandas", "scipy"]
@@ -13,10 +13,10 @@ dependencies = ["numpy", "pandas", "scipy"]
 [project.optional-dependencies]
 test = ["pytest", "QuantLib"]
 demo = ["streamlit"]
-rapport = ["matplotlib", "QuantLib"]
+report = ["matplotlib", "QuantLib"]
 
 [tool.setuptools]
-packages = ["courbes"]
+packages = ["ratecurves"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

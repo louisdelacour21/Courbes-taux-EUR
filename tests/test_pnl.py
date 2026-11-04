@@ -1,56 +1,50 @@
-"""PnL explain : identité de la décomposition, résiduel nul en portage pur, d'ordre 3 sur un choc parallèle."""
-from datetime import date, timedelta
+"""PnL explain: identity of the decomposition, zero residual under pure carry, third order on a parallel shock."""
+from datetime import timedelta, date
 
 import pytest
 
-from courbes import cotations as c
-from courbes import dates as dt
-from courbes import pricing as p
-from courbes import pnl
-from courbes import risque as r
-from courbes.curves import Courbe, CourbeHW
+from ratecurves import dates as dt
+from ratecurves import pnl
+from ratecurves import pricing as p
+from ratecurves import quotes as c
+from ratecurves import risk as r
+from ratecurves.curves import Curve, CurveHW
 
-COT = c.lire_cotations()
-JOURS = sorted(COT.date.unique())
-J0, J1 = JOURS[-2], JOURS[-1]
-PF, FIX = p.lire_portefeuille(), p.fixings_depot(COT)
-
-
-def cotations(jour):
-    g = COT[COT.date == jour]
-    o, s6 = g[g.type == "OIS"], g[g.type.isin(["DEPOT", "FRA", "IRS"])]
-    return dict(zip(o.tenor, o.taux)), dict(zip(s6.type + " " + s6.tenor, s6.taux))
+QUOTES = c.read_quotes()
+DAYS = sorted(QUOTES.date.unique())
+D0, D1 = DAYS[-2], DAYS[-1]
+PF, FIX = p.read_portfolio(), p.deposit_fixings(QUOTES)
 
 
-def portees(classe):
-    cot0 = cotations(J0)
-    return cot0, pnl.cotations_portees(*r.construire(J0, *cot0, classe), *cot0, J1)
+def carried(cls):
+    q0 = c.of_day(QUOTES, D0)
+    return q0, pnl.carried_quotes(*r.build(D0, *q0, cls), *q0, D1)
 
 
-@pytest.mark.parametrize("classe", [Courbe, CourbeHW])
-def test_portage_pur_residuel_nul(classe):
-    cot0, qc = portees(classe)
-    e = pnl.expliquer(PF, J0, J1, cot0, qc, FIX, classe)
-    assert abs(e["delta"]) < 1e-6 and abs(e["gamma"]) < 1e-6 and abs(e["residuel"]) < 1e-6
-    assert e["total"] == pytest.approx(e["portage"] + e["fixings"], abs=1e-6)
+@pytest.mark.parametrize("cls", [Curve, CurveHW])
+def test_pure_carry_zero_residual(cls):
+    q0, qc = carried(cls)
+    e = pnl.explain(PF, D0, D1, q0, qc, FIX, cls)
+    assert abs(e["delta"]) < 1e-6 and abs(e["gamma"]) < 1e-6 and abs(e["residual"]) < 1e-6
+    assert e["total"] == pytest.approx(e["carry"] + e["fixings"], abs=1e-6)
 
 
-@pytest.mark.parametrize("classe", [Courbe, CourbeHW])
-def test_choc_parallele_residuel_ordre_3(classe):
-    cot0, qc = portees(classe)
+@pytest.mark.parametrize("cls", [Curve, CurveHW])
+def test_parallel_shock_third_order_residual(cls):
+    q0, qc = carried(cls)
     res = []
     for d in (5, 10):
-        cot1 = tuple({k: v + d / 100 for k, v in q.items()} for q in qc)
-        e = pnl.expliquer(PF, J0, J1, cot0, cot1, FIX, classe)
-        assert abs(e["residuel"]) < 1e-3 * abs(e["delta"])
-        res.append(e["residuel"])
-    assert res[1] / res[0] == pytest.approx(8, rel=0.05)  # doubler le choc multiplie le résiduel par 2³
+        q1 = tuple({k: v + d / 100 for k, v in q.items()} for q in qc)
+        e = pnl.explain(PF, D0, D1, q0, q1, FIX, cls)
+        assert abs(e["residual"]) < 1e-3 * abs(e["delta"])
+        res.append(e["residual"])
+    assert res[1] / res[0] == pytest.approx(8, rel=0.05)  # doubling the shock multiplies the residual by 2³
 
 
-def test_flux_payes():
-    s = p.Swap(date(2025, 6, 2), "2Y", 0.03, 1e6)  # premier coupon fixe payé avec le 2e variable, en juin 2026
-    (bf, tf), (a, bv, tv) = s.ech.fixe[0], s.ech.variable[1]
-    assert bf == bv and JOURS[0] < bf <= J1
-    attendu = 1e6 * (tv * FIX(dt.add_business_days(a, -2)) - 0.03 * tf)
-    assert s.flux(bf - timedelta(days=1), bf, FIX) == pytest.approx(attendu, rel=1e-14)
-    assert s.flux(bf, J1, FIX) == 0
+def test_paid_cashflows():
+    s = p.Swap(date(2025, 6, 2), "2Y", 0.03, 1e6)  # first fixed coupon paid with the 2nd floating one, in June 2026
+    (bf, tf), (a, bv, tv) = s.sched.fixed[0], s.sched.floating[1]
+    assert bf == bv and DAYS[0] < bf <= D1
+    expected = 1e6 * (tv * FIX(dt.add_business_days(a, -2)) - 0.03 * tf)
+    assert s.cashflows(bf - timedelta(days=1), bf, FIX) == pytest.approx(expected, rel=1e-14)
+    assert s.cashflows(bf, D1, FIX) == 0
