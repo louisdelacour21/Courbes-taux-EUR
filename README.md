@@ -3,6 +3,8 @@
 Bootstrap an €STR discount curve and a EURIBOR 6M projection curve, price a swap portfolio (DV01, pillar risks,
 PnL explain), all reproduced exactly by QuantLib.
 
+**Live demo:** https://courbes-taux-eur.streamlit.app/
+
 ## Progress
 
 | # | Step | Status |
@@ -16,7 +18,7 @@ PnL explain), all reproduced exactly by QuantLib.
 | 7 | NSS | done |
 | 8 | Pricer, buckets, hedging, IRRBB | done |
 | 9 | PnL explain | done |
-| 10 | Demo, morning briefing, validation report | done (online deployment pending) |
+| 10 | Demo, morning briefing, validation report | done |
 
 ## Date engine (`ratecurves/dates.py`)
 
@@ -229,7 +231,7 @@ pillar is now dropped.
 > Levels reconstructed from public ECB data; QuantLib validation independent of the data source; interpolation and
 > PnL explain studies on synthetic data.
 
-**Streamlit demo**: `streamlit run app/streamlit_app.py`. Tabs for curves (6M forwards, log-linear against
+**Streamlit demo**: [online](https://courbes-taux-eur.streamlit.app/), or locally with `streamlit run app/streamlit_app.py`. Tabs for curves (6M forwards, log-linear against
 Hagan-West), risk (buckets, swaps, IRRBB), PnL explain (precomputed series), morning briefing and validation studies.
 The curves of the chosen day are built on the fly (a few tenths of a second); the PnL explain, 10 minutes of
 computation, is read from `studies/pnl_series.csv`.
